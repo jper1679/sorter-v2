@@ -36,6 +36,7 @@ pico_sdk_init()
 option(HW_SKR_PICO "Compile for SKR Pico hardware" OFF)
 option(HW_BASICALLY_V1_1 "Compile for Basically V1-1 board (4 steppers, LED pins on GPIO14/GPIO15)" OFF)
 option(HW_BASICALLY_V1_2 "Compile for Basically V1-2 board (5 steppers, LED pins on GPIO1/GPIO6)" OFF)
+option(HW_BASICALLY_V1_3 "Compile for Basically V1-3 board (5 steppers with Y1 25MHz external oscillator)" ON)
 set(FIRMWARE_ROLE "feeder" CACHE STRING "Firmware role profile: feeder or distribution")
 set_property(CACHE FIRMWARE_ROLE PROPERTY STRINGS feeder distribution)
 
@@ -59,6 +60,8 @@ elseif(HW_BASICALLY_V1_1)
     set(FIRMWARE_VARIANT "${FIRMWARE_ROLE_NORMALIZED}-v1-1")
 elseif(HW_BASICALLY_V1_2)
     set(FIRMWARE_VARIANT "${FIRMWARE_ROLE_NORMALIZED}-v1-2")
+elseif(HW_BASICALLY_V1_3)
+    set(FIRMWARE_VARIANT "${FIRMWARE_ROLE_NORMALIZED}-v1-3")
 endif()
 
 set(FIRMWARE_GIT_VERSION "unknown")
@@ -137,6 +140,9 @@ endif()
 if (HW_BASICALLY_V1_2)
     target_compile_definitions(sorter_interface_firmware PRIVATE HW_BASICALLY_V1_2)
 endif()
+if (HW_BASICALLY_V1_3)
+    target_compile_definitions(sorter_interface_firmware PRIVATE HW_BASICALLY_V1_3)
+endif()
 if (FIRMWARE_ROLE_NORMALIZED STREQUAL "distribution")
     target_compile_definitions(sorter_interface_firmware PRIVATE FIRMWARE_ROLE_DISTRIBUTION)
 else()
@@ -155,3 +161,48 @@ target_link_libraries(sorter_interface_firmware
         )
 
 pico_add_extra_outputs(sorter_interface_firmware)
+
+# Test Console Firmware Executable Target
+add_executable(test_console_firmware 
+    test_console_firmware.cpp 
+    TMC2209.cpp 
+    TMC_UART.cpp
+    Stepper.cpp 
+    cobs.c 
+    crc.c 
+    message.cpp 
+    PCA9685.cpp
+    Servo.cpp
+)
+
+pico_set_program_name(test_console_firmware "test_console_firmware")
+pico_set_program_version(test_console_firmware "${FIRMWARE_GIT_VERSION}")
+pico_enable_stdio_uart(test_console_firmware 0)
+pico_enable_stdio_usb(test_console_firmware 1)
+
+target_include_directories(test_console_firmware PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+target_compile_definitions(
+    test_console_firmware
+    PRIVATE
+        HW_BASICALLY_V1_3
+        FIRMWARE_ROLE_DISTRIBUTION
+        FIRMWARE_GIT_VERSION="${FIRMWARE_GIT_VERSION}"
+        FIRMWARE_GIT_COMMIT="${FIRMWARE_GIT_COMMIT}"
+        FIRMWARE_BUILD_TIME_UTC="${FIRMWARE_BUILD_TIME_UTC}"
+        FIRMWARE_VARIANT="${FIRMWARE_VARIANT}"
+)
+
+target_link_libraries(test_console_firmware
+        pico_multicore
+        pico_stdlib
+        pico_bootrom
+        pico_time
+        hardware_i2c
+        hardware_timer
+        hardware_pwm
+        hardware_adc
+        hardware_watchdog
+        )
+
+pico_add_extra_outputs(test_console_firmware)
+

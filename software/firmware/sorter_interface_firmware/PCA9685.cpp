@@ -28,8 +28,46 @@
 #define PCA9685_PWM_FULL 4096
 #define PCA9685_I2C_TIMEOUT_US 1000 // 1ms timeout for I2C operations
 
-PCA9685::PCA9685(uint8_t i2c_addr, i2c_inst_t *i2c_port) : _i2c_addr(i2c_addr), _i2c_port(i2c_port) {
+PCA9685::PCA9685(uint8_t i2c_addr, i2c_inst_t *i2c_port)
+    : _i2c_addr(i2c_addr), _i2c_port(i2c_port), _osc_freq(25000000), _use_ext_clock(false) {
     _channel_duty.fill(0);
+}
+
+/** \brief Select the clock source (Internal 25MHz Oscillator vs External EXTCLK pin)
+ *
+ * Per NXP PCA9685 datasheet section 7.3.1:
+ * To use an external clock signal, the EXTCLK bit must be set when the SLEEP bit is HIGH.
+ *
+ * \param external_clock true to use external EXTCLK pin (e.g. Y1 25MHz crystal/oscillator), false for internal.
+ * \param clock_freq Frequency of the clock source in Hz (default: 25000000).
+ * \return true on successful configuration, false on I2C error.
+ */
+bool PCA9685::setClockSource(bool external_clock, uint32_t clock_freq) {
+    _osc_freq = clock_freq;
+    _use_ext_clock = external_clock;
+
+    // Step 1: Put PCA9685 into sleep mode
+    uint8_t cmd_sleep[] = {PCA_REG_MODE1, PCA_MODE1_SLEEP};
+    int res = i2c_write_timeout_us(_i2c_port, _i2c_addr, cmd_sleep, 2, false, PCA9685_I2C_TIMEOUT_US);
+    if (res < 0) return false;
+
+    sleep_us(500);
+
+    if (external_clock) {
+        // Step 2: Set EXTCLK bit AND SLEEP bit simultaneously (datasheet requirement: EXTCLK can only be set when SLEEP is 1)
+        uint8_t cmd_extclk[] = {PCA_REG_MODE1, static_cast<uint8_t>(PCA_MODE1_SLEEP | PCA_MODE1_EXTCLK)};
+        res = i2c_write_timeout_us(_i2c_port, _i2c_addr, cmd_extclk, 2, false, PCA9685_I2C_TIMEOUT_US);
+        if (res < 0) return false;
+    }
+
+    // Step 3: Turn off SLEEP bit (keep EXTCLK bit if set, and enable Auto-Increment)
+    uint8_t mode1_val = external_clock ? (PCA_MODE1_EXTCLK | PCA_MODE1_AI) : PCA_MODE1_AI;
+    uint8_t cmd_wake[] = {PCA_REG_MODE1, mode1_val};
+    res = i2c_write_timeout_us(_i2c_port, _i2c_addr, cmd_wake, 2, false, PCA9685_I2C_TIMEOUT_US);
+    if (res < 0) return false;
+
+    sleep_us(500); // Wait for clock signal to stabilize
+    return true;
 }
 
 /** \brief Detect if the PCA9685 is present on the I2C bus and initialize it
@@ -79,17 +117,17 @@ bool PCA9685::initialize() {
 
 /** \brief Set the PWM frequency for all channels
  *
- * The PCA9685 has a fixed internal oscillator frequency (25MHz) and a 12-bit resolution for the PWM duty cycle (4096
+ * The PCA9685 has a fixed internal oscillator frequency (25MHz) or external clock and a 12-bit resolution for the PWM duty cycle (4096
  * steps). The PWM frequency is determined by the prescaler value, which is calculated using the formula:
  *
- * \f$ prescale = round(\frac{25 \text{MHz}}{4096 \cdot freq}) - 1 \f$
+ * \f$ prescale = round(\frac{OSC\_FREQ}{4096 \cdot freq}) - 1 \f$
  *
  * \param freq Desired PWM frequency in Hz. Minimum value is approximately 24Hz (prescale=255), maximum value is
  * approximately 1526Hz (prescale=3). Values outside this range will be clamped.
  */
 void PCA9685::setPWMFreq(uint16_t freq) {
     // Calculate prescale value using the datasheet formula and fixed point math
-    int prescaleval = 10 * PCA9685_OSC_FREQ / ((PCA9685_MAX_PWM + 1) * freq);
+    int prescaleval = 10 * _osc_freq / ((PCA9685_MAX_PWM + 1) * freq);
     prescaleval = ((prescaleval + 5) / 10); // Round to nearest integer
     prescaleval -= 1;                       // Subtract 1 from the result
 

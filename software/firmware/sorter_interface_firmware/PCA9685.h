@@ -69,12 +69,17 @@ class PCA9685 {
   public:
     PCA9685(uint8_t i2c_addr, i2c_inst_t *i2c_port);
     bool initialize();
+    bool setClockSource(bool external_clock, uint32_t clock_freq = 25000000);
     void setPWMFreq(uint16_t freq);
     void setPWM(uint8_t channel, uint16_t duty);
+    uint32_t getClockFreq() const { return _osc_freq; }
+    bool isExternalClock() const { return _use_ext_clock; }
 
   private:
     uint8_t _i2c_addr;
     i2c_inst_t *_i2c_port;
+    uint32_t _osc_freq;
+    bool _use_ext_clock;
     std::array<uint16_t, 16> _channel_duty; // Store duty cycle for each channel to minimize I2C writes
 };
 
