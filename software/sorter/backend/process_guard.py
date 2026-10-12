@@ -18,6 +18,13 @@ try:
 except ImportError:  # pragma: no cover - not expected on macOS/Linux dev hosts
     fcntl = None
 
+try:
+    import msvcrt
+except ImportError:
+    msvcrt = None
+
+SIGKILL = getattr(signal, "SIGKILL", signal.SIGTERM)
+
 
 APP_NAME = "lego-sorter-client-backend"
 LOCK_RETRY_INTERVAL_S = 0.1
@@ -55,6 +62,12 @@ class BackendProcessGuard:
                 fcntl.flock(self._handle.fileno(), fcntl.LOCK_UN)
             except Exception:
                 pass
+        elif msvcrt is not None:
+            try:
+                self._handle.seek(0)
+                msvcrt.locking(self._handle.fileno(), msvcrt.LK_UNLCK, 1)
+            except Exception:
+                pass
 
         try:
             self._handle.close()
@@ -72,8 +85,8 @@ def acquire_backend_process_guard(
     cleanup_port_conflicts: bool = True,
     lock_path: Path | None = None,
 ) -> BackendProcessGuard:
-    if fcntl is None:
-        raise ProcessGuardError("Backend process guard requires fcntl support on this platform.")
+    if fcntl is None and msvcrt is None:
+        raise ProcessGuardError("Backend process guard requires fcntl or msvcrt support on this platform.")
 
     resolved_script = script_path.resolve()
     resolved_repo = repo_root.resolve()
@@ -178,8 +191,14 @@ def _acquire_or_replace_lock(
 
 
 def _try_lock(handle: TextIO) -> None:
-    assert fcntl is not None
-    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    if fcntl is not None:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    elif msvcrt is not None:
+        handle.seek(0)
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError as exc:
+            raise BlockingIOError from exc
 
 
 def _read_metadata(handle: TextIO) -> dict[str, Any] | None:
@@ -225,7 +244,7 @@ def _terminate_process(pid: int, logger: Any | None) -> None:
         return
 
     _log(logger, "warning", "Backend pid=%s did not exit after SIGTERM; escalating to SIGKILL.", pid)
-    if not _send_signal(pid, signal.SIGKILL):
+    if not _send_signal(pid, SIGKILL):
         return
     if _wait_for_process_exit(pid, FORCE_KILL_GRACE_PERIOD_S):
         return

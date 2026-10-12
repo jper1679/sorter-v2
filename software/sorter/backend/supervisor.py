@@ -175,15 +175,21 @@ class BackendSupervisor:
             return
 
         try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
+            if hasattr(os, "killpg"):
+                os.killpg(process.pid, signal.SIGTERM)
+            else:
+                process.terminate()
+        except (ProcessLookupError, OSError):
             pass
         try:
             process.wait(timeout=self._stop_timeout_s)
         except subprocess.TimeoutExpired:
             try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
+                if hasattr(os, "killpg"):
+                    os.killpg(process.pid, getattr(signal, "SIGKILL", signal.SIGTERM))
+                else:
+                    process.kill()
+            except (ProcessLookupError, OSError):
                 pass
             try:
                 process.wait(timeout=2.0)
