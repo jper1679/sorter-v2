@@ -64,6 +64,8 @@ def _open_camera_for_probe(index: int) -> cv2.VideoCapture:
     # the others fail their first read ("No preview"). Negotiate MJPEG here.
     if platform.system() == "Darwin":
         return cv2.VideoCapture(index, cv2.CAP_AVFOUNDATION)
+    if platform.system() == "Windows":
+        return cv2.VideoCapture(index, cv2.CAP_DSHOW)
     try:
         from vision.camera import _open_capture_source
 
@@ -179,7 +181,53 @@ def _list_usb_cameras() -> List[Dict[str, Any]]:
                 )
             return cameras
 
-    # Linux: a capture camera is a node with pixel formats. Asking for them does
+    if platform.system() == "Windows":
+        enumerated: list[tuple[int, str]] = []
+        try:
+            from cv2_enumerate_cameras import enumerate_cameras
+
+            for c in enumerate_cameras(cv2.CAP_DSHOW):
+                enumerated.append((int(c.index), str(c.name or f"USB Camera {c.index}")))
+        except Exception:
+            pass
+
+        if not enumerated:
+            for idx in range(8):
+                if idx in active and active[idx] != (0, 0):
+                    enumerated.append((idx, f"USB Camera {idx}"))
+                else:
+                    cap = _open_camera_for_probe(idx)
+                    if cap.isOpened():
+                        cap.release()
+                        enumerated.append((idx, f"USB Camera {idx}"))
+
+        indices_to_probe = [idx for idx, _ in enumerated if idx not in active]
+        probed_map: dict[int, dict] = {}
+        if indices_to_probe:
+            with ThreadPoolExecutor(max_workers=min(4, len(indices_to_probe))) as pool:
+                futs = {pool.submit(_probe_camera_index, idx): idx for idx in indices_to_probe}
+                for fut in as_completed(futs):
+                    idx = futs[fut]
+                    probed_map[idx] = fut.result() or {}
+
+        cameras: List[Dict[str, Any]] = []
+        for idx, name in enumerated:
+            if idx in active and active[idx] != (0, 0):
+                w, h = active[idx]
+                info = {"width": w, "height": h, "preview_available": True}
+            else:
+                info = probed_map.get(idx, {})
+            cameras.append(
+                {
+                    "kind": "usb",
+                    "index": idx,
+                    "name": name,
+                    "width": int(info.get("width", 0)),
+                    "height": int(info.get("height", 0)),
+                    "preview_available": bool(info.get("preview_available", False)),
+                }
+            )
+        return cameras
     # not open a stream, so a camera already streaming a preview (or a probe
     # running in a parallel request) is still listed; opening every camera to
     # probe it made the list come back with a different subset each time.

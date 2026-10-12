@@ -74,6 +74,22 @@ def _open_capture_source(
 ) -> cv2.VideoCapture:
     if isinstance(source, int) and platform.system() == "Darwin":
         return cv2.VideoCapture(source, cv2.CAP_AVFOUNDATION)
+    if isinstance(source, int) and platform.system() == "Windows":
+        cap = cv2.VideoCapture(source, cv2.CAP_DSHOW)
+        if not cap.isOpened():
+            cap = cv2.VideoCapture(source)
+        if isinstance(fourcc, str) and len(fourcc.strip()) >= 4:
+            try:
+                cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*fourcc.strip()[:4].upper()))
+            except Exception:
+                pass
+        if isinstance(width, int) and width > 0:
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, width)
+        if isinstance(height, int) and height > 0:
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
+        if isinstance(fps, int) and fps > 0:
+            cap.set(cv2.CAP_PROP_FPS, fps)
+        return cap
     if isinstance(source, int) and platform.system() == "Linux":
         # V4L2 MJPEG capture via cv2.VideoCapture (software JPEG decode). A HW
         # GStreamer mppjpegdec path used to live here; it was removed because it
