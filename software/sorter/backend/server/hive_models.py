@@ -68,7 +68,7 @@ HIVE_SENTINEL_KEY = "hive"
 # Anything else (notably ``pytorch``) shows up in the catalog but cannot be
 # activated — we filter those out of the auto-download and mark them
 # ``compatible: False`` in the installed list so the UI can disable Activate.
-DEPLOYABLE_RUNTIMES: frozenset[str] = frozenset({"onnx", "ncnn", "hailo", "rknn"})
+DEPLOYABLE_RUNTIMES: frozenset[str] = frozenset({"tensorrt", "onnx", "ncnn", "hailo", "rknn"})
 
 # What a model is FOR. Hive publishes this per model; the download/install path
 # is identical across purposes and only the consumer differs. Models installed
@@ -169,6 +169,27 @@ def _hasAnyPath(*paths: str) -> bool:
     return False
 
 
+_HAS_HAILO_CACHE: bool | None = None
+_HAS_RKNN_NPU_CACHE: bool | None = None
+_HAS_TENSORRT_CACHE: bool | None = None
+
+
+def _has_tensorrt() -> bool:
+    """True when an NVIDIA GPU (Jetson Tegra / CUDA) and TensorRT runtime are present."""
+    global _HAS_TENSORRT_CACHE
+    if _HAS_TENSORRT_CACHE is None:
+        has_gpu = _hasAnyPath("/dev/nvhost-gpu", "/dev/nvgpu/igpu0", "/dev/nvidia0")
+        if has_gpu:
+            try:
+                import tensorrt  # noqa: F401
+                _HAS_TENSORRT_CACHE = True
+            except Exception:
+                _HAS_TENSORRT_CACHE = False
+        else:
+            _HAS_TENSORRT_CACHE = False
+    return _HAS_TENSORRT_CACHE
+
+
 def _has_hailo() -> bool:
     """True if a Hailo accelerator appears to be present on this machine.
 
@@ -199,10 +220,13 @@ def _has_rknn_npu() -> bool:
 def compatible_runtimes_for_this_machine() -> list[str]:
     """Deployable runtimes this machine can run, best first.
 
-    ``hailo`` when a Hailo device is present, ``rknn`` when the RK3588 NPU is,
-    then ``ncnn`` before ``onnx`` on ARM and ``onnx`` before ``ncnn`` elsewhere.
+    ``tensorrt`` on NVIDIA Jetson / CUDA GPU, ``hailo`` when a Hailo device is present,
+    ``rknn`` when the RK3588 NPU is, then ``ncnn`` before ``onnx`` on ARM and
+    ``onnx`` before ``ncnn`` elsewhere.
     """
     runtimes: list[str] = []
+    if _has_tensorrt():
+        runtimes.append("tensorrt")
     if _has_hailo():
         runtimes.append("hailo")
     if _has_rknn_npu():

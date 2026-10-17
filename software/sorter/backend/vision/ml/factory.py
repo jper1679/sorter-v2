@@ -98,6 +98,24 @@ def create_processor(
                 iou_threshold=iou_threshold,
             )
 
+    if runtime == "tensorrt":
+        from .tensorrt import TensorrtNanodetProcessor, TensorrtYoloProcessor
+
+        if family == "yolo":
+            return TensorrtYoloProcessor(
+                model_path,
+                imgsz=imgsz,
+                conf_threshold=conf_threshold,
+                iou_threshold=iou_threshold,
+            )
+        if family == "nanodet":
+            return TensorrtNanodetProcessor(
+                model_path,
+                imgsz=imgsz,
+                conf_threshold=conf_threshold,
+                iou_threshold=iou_threshold,
+            )
+
     raise ValueError(
         f"Unsupported combination runtime={runtime!r} family={family!r}"
     )
@@ -166,6 +184,15 @@ def resolve_variant_artifact(run_dir: Path, runtime: str) -> Path | None:
         for hef in sorted(exports.glob("*.hef")):
             return hef
         # The tarball may still be there; user must extract.
+        return None
+
+    if rt == "tensorrt":
+        for engine in sorted(exports.glob("*.engine")):
+            return engine
+        # If no .engine compiled yet, return best.onnx so auto-compilation can occur
+        best_onnx = exports / "best.onnx"
+        if best_onnx.exists():
+            return best_onnx
         return None
 
     if rt == "pytorch":
