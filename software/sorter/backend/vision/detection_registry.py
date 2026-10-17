@@ -21,7 +21,7 @@ MODELS_DIR = Path(__file__).resolve().parent.parent / "blob" / "hive_detection_m
 MODEL_FAMILIES = frozenset({"yolo", "nanodet"})
 # Runtimes a model can be loaded with, in the order a local model without a
 # declared runtime is probed.
-MODEL_RUNTIMES = ("onnx", "ncnn", "hailo", "rknn")
+MODEL_RUNTIMES = ("tensorrt", "onnx", "ncnn", "hailo", "rknn")
 
 _SCOPE_BY_HIVE_SCOPE: dict[str, DetectionScope] = {
     "classification_chamber": "classification",
@@ -52,7 +52,7 @@ class DetectionAlgorithmDefinition:
     model_path: Path | None = None
     model_family: str | None = None
     imgsz: int | None = None
-    runtime: str | None = None  # "onnx" | "ncnn" | "hailo" | "rknn" (installed models only)
+    runtime: str | None = None  # "tensorrt" | "onnx" | "ncnn" | "hailo" | "rknn" (installed models only)
     hive_metadata: dict[str, Any] | None = None
 
 

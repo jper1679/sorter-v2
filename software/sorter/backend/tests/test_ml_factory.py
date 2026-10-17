@@ -23,6 +23,9 @@ def _seed_variant(tmp_path, runtime: str):
     elif runtime == "hailo":
         path = exports / "chamber.hef"
         path.write_bytes(b"x")
+    elif runtime == "tensorrt":
+        path = exports / "best.engine"
+        path.write_bytes(b"x")
     else:
         raise AssertionError(runtime)
     return path
@@ -31,6 +34,11 @@ def _seed_variant(tmp_path, runtime: str):
 def test_resolve_onnx(tmp_path):
     seeded = _seed_variant(tmp_path, "onnx")
     assert resolve_variant_artifact(tmp_path, "onnx") == seeded
+
+
+def test_resolve_tensorrt(tmp_path):
+    seeded = _seed_variant(tmp_path, "tensorrt")
+    assert resolve_variant_artifact(tmp_path, "tensorrt") == seeded
 
 
 def test_resolve_ncnn_param(tmp_path):
@@ -48,6 +56,7 @@ def test_resolve_missing(tmp_path):
     assert resolve_variant_artifact(tmp_path, "onnx") is None
     assert resolve_variant_artifact(tmp_path, "ncnn") is None
     assert resolve_variant_artifact(tmp_path, "hailo") is None
+    assert resolve_variant_artifact(tmp_path, "tensorrt") is None
 
 
 def test_factory_unsupported_runtime(tmp_path):
@@ -79,6 +88,19 @@ def test_factory_builds_onnx_without_loading(tmp_path):
         imgsz=320,
     )
     assert proc.runtime == "onnx"
+    assert proc.family == "yolo"
+    assert proc.imgsz == 320
+
+
+def test_factory_builds_tensorrt_without_loading(tmp_path):
+    seeded = _seed_variant(tmp_path, "tensorrt")
+    proc = create_processor(
+        model_path=seeded,
+        model_family="yolo",
+        runtime="tensorrt",
+        imgsz=320,
+    )
+    assert proc.runtime == "tensorrt"
     assert proc.family == "yolo"
     assert proc.imgsz == 320
 
