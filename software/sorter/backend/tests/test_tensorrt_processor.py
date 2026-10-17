@@ -6,8 +6,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from vision.ml.tensorrt import _has_tensorrt if hasattr(__import__("vision.ml.tensorrt", fromlist=["_has_tensorrt"]), "_has_tensorrt") else None
-from server.hive_models import compatible_runtimes_for_this_machine, _has_tensorrt
+from server.hive_models import compatible_runtimes_for_this_machine
 from vision.ml.factory import create_processor, resolve_variant_artifact
 
 
