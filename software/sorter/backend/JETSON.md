@@ -38,19 +38,26 @@ This document records the architectural decisions, platform specifics, and roadm
 
 ## 3. Milestones & Checklist
 
-- [ ] **Step 1: Jetson Environment Preparation**
+- [x] **Step 1: Jetson Environment Preparation**
   - Verify Python environment (uv / Python 3.12+), Node.js, and pnpm on the Jetson.
   - Validate udev permissions for Raspberry Pi Pico boards (`99-sorter-pico.rules`).
   - Verify USB camera access (`v4l2-ctl --list-devices`).
+  - Configure 8GB swapfile for Jetson 8GB unified memory.
 
-- [ ] **Step 2: Basic Backend & Frontend Bring-up**
-  - Run `install.sh` or configure manual virtual environment on the Jetson.
+- [x] **Step 2: Basic Backend & Frontend Bring-up**
+  - Run `./install.sh --as-service` on the Jetson.
   - Clone/checkout branch `feat/jetson-orin-nano`.
-  - Start the backend and verify web UI access from the local network.
+  - Service `sorter-backend-dev.service` running under systemd on port 80 (UI) and port 8000 (API).
+  - Web UI and REST API accessible from LAN (`http://192.168.2.136`).
 
-- [ ] **Step 3: Hardware Verification**
-  - Connect Feeder and Distribution Pico boards; test serial handshake.
-  - Test camera assignment in Settings -> Cameras.
+- [x] **Step 3: Hardware Verification**
+  - Connected Pico board identified on `/dev/ttyACM0` (`DISTRIBUTION MB` with firmware `v0.8.1`).
+  - Connected USB cameras identified (1x Innomaker 4K `/dev/video0`, 2x Realtek `/dev/video2`, `/dev/video4`).
+  - Live frame capture validated in OpenCV and perception service.
+
+- [x] **Step 3.5: TensorRT Setup**
+  - Installed `nvidia-tensorrt` 10.16.2.10 and `libnvinfer-bin` (`trtexec`).
+  - Linked Python `tensorrt` 10.16.2.10 into backend virtual environment (`system-dist-packages.pth`).
 
 - [ ] **Step 4: Vision Pipeline with ONNX (Baseline)**
   - Load classification models in ONNX runtime.
