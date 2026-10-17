@@ -86,6 +86,7 @@ class TestPickRuntime:
     def test_hailo_not_selected_when_hardware_missing(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        monkeypatch.setattr(hive_models, "_has_tensorrt", lambda: False)
         monkeypatch.setattr(hive_models, "_has_hailo", lambda: False)
         monkeypatch.setattr(hive_models.platform, "machine", lambda: "x86_64")
         # Hailo is offered but hardware isn't present — we should pick onnx.
@@ -94,6 +95,7 @@ class TestPickRuntime:
         )
 
     def test_rknn_on_an_rk3588(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(hive_models, "_has_tensorrt", lambda: False)
         monkeypatch.setattr(hive_models, "_has_hailo", lambda: False)
         monkeypatch.setattr(hive_models, "_has_rknn_npu", lambda: True)
         monkeypatch.setattr(hive_models.platform, "machine", lambda: "aarch64")
@@ -102,9 +104,20 @@ class TestPickRuntime:
             hive_models.pick_runtime_for_this_machine(["onnx", "ncnn", "rknn"]) == "rknn"
         )
 
+    def test_tensorrt_on_a_jetson(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(hive_models, "_has_tensorrt", lambda: True)
+        monkeypatch.setattr(hive_models, "_has_hailo", lambda: False)
+        monkeypatch.setattr(hive_models, "_has_rknn_npu", lambda: False)
+        monkeypatch.setattr(hive_models.platform, "machine", lambda: "aarch64")
+        assert hive_models.compatible_runtimes_for_this_machine() == ["tensorrt", "ncnn", "onnx"]
+        assert (
+            hive_models.pick_runtime_for_this_machine(["onnx", "ncnn", "tensorrt"]) == "tensorrt"
+        )
+
     def test_compatible_runtimes_without_accelerators(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        monkeypatch.setattr(hive_models, "_has_tensorrt", lambda: False)
         monkeypatch.setattr(hive_models, "_has_hailo", lambda: False)
         monkeypatch.setattr(hive_models, "_has_rknn_npu", lambda: False)
         monkeypatch.setattr(hive_models.platform, "machine", lambda: "x86_64")

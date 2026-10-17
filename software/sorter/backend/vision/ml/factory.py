@@ -189,10 +189,6 @@ def resolve_variant_artifact(run_dir: Path, runtime: str) -> Path | None:
     if rt == "tensorrt":
         for engine in sorted(exports.glob("*.engine")):
             return engine
-        # If no .engine compiled yet, return best.onnx so auto-compilation can occur
-        best_onnx = exports / "best.onnx"
-        if best_onnx.exists():
-            return best_onnx
         return None
 
     if rt == "pytorch":
