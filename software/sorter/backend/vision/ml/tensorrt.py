@@ -186,12 +186,16 @@ class _TensorrtEngine:
 
 class _TensorrtMixin:
     model_path: Path
-    _lock: Any
     _engine: _TensorrtEngine | None = None
     _load_failed: bool = False
 
+    def _get_lock(self) -> threading.RLock:
+        if not hasattr(self, "_rlock"):
+            self._rlock = threading.RLock()
+        return self._rlock
+
     def _ensure_engine(self) -> _TensorrtEngine:
-        with self._lock:
+        with self._get_lock():
             if self._load_failed:
                 raise RuntimeError(f"TensorRT model load permanently failed: {self.model_path}")
             if self._engine is None:
@@ -219,7 +223,7 @@ class TensorrtYoloProcessor(_TensorrtMixin, BaseProcessor):
         *,
         conf_threshold: float | None = None,
     ) -> list[Detection]:
-        with self._lock:
+        with self._get_lock():
             engine = self._ensure_engine()
             blob, pre = preprocess_yolo(image_bgr, self.imgsz)
             output = engine.infer(blob)
@@ -264,7 +268,7 @@ class TensorrtNanodetProcessor(_TensorrtMixin, BaseProcessor):
         *,
         conf_threshold: float | None = None,
     ) -> list[Detection]:
-        with self._lock:
+        with self._get_lock():
             engine = self._ensure_engine()
             blob, pre = preprocess_nanodet(image_bgr, self.imgsz)
             output = engine.infer(blob)
