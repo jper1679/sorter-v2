@@ -32,7 +32,7 @@ from .arcs import bboxInsideChannelMask
 from .capture import CaptureWorker
 from .channel import ChannelDef, channelDefFor
 from .inference import InferenceWorker, OnExitEdge
-from .runtime import InferenceRuntime, RknnYoloRuntime
+from .runtime import InferenceRuntime, RknnYoloRuntime, UniversalYoloRuntime
 from .state import ChannelState, EMPTY_STATE, LatestStateSlot
 
 
@@ -729,7 +729,7 @@ def build(
     irl_config: Any,
     camera_service: Any,
     model_path_lookup,                  # callable: algorithm_id -> (model_path, imgsz) or None
-    runtime_factory=RknnYoloRuntime,    # injectable for tests
+    runtime_factory=UniversalYoloRuntime,  # injectable for tests
     conf_thresholds: Optional[Dict[int, float]] = None,
     on_c3_exit_edge: Optional[OnExitEdge] = None,
 ) -> PerceptionService:

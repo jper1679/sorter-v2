@@ -130,6 +130,13 @@ def _model_definition(entry: Path, meta: dict[str, Any]) -> DetectionAlgorithmDe
             log.info("Skipping Hive model %s — unsupported family %r", entry.name, model_family)
             return None
         runtime = str(hive_info.get("variant_runtime") or "onnx").lower()
+        if (entry / "exports" / "best.engine").exists():
+            try:
+                from server.hive_models import _has_tensorrt
+                if _has_tensorrt():
+                    runtime = "tensorrt"
+            except Exception:
+                pass
         if runtime not in MODEL_RUNTIMES:
             log.info("Skipping Hive model %s — unsupported runtime %r", entry.name, runtime)
             return None

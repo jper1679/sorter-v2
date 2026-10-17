@@ -49,6 +49,144 @@ class InferenceRuntime(Protocol):
         ...
 
 
+class UniversalYoloRuntime:
+    """Hardware-adaptive YOLO inference runtime for perception workers.
+
+    Dispatches to the appropriate accelerator processor:
+    - TensorRT on NVIDIA Jetson (or any CUDA/TensorRT host)
+    - RKNN on Rockchip RK3588 (Orange Pi 5)
+    - Hailo-8 on boards with a Hailo M.2 HAT
+    - ONNX / NCNN on general Linux / macOS test environments
+    """
+
+    __slots__ = (
+        "_processor", "_core_mask_name", "_model_path", "_imgsz",
+        "_conf_threshold", "_iou_threshold", "_runtime",
+    )
+
+    def __init__(
+        self,
+        *,
+        model_path,
+        imgsz: int,
+        core_mask_name: str = "",
+        conf_threshold: float = 0.25,
+        iou_threshold: float = 0.45,
+        runtime: Optional[str] = None,
+    ) -> None:
+        from pathlib import Path
+        from vision.ml.factory import create_processor
+
+        path = Path(model_path)
+        self._core_mask_name = core_mask_name
+        self._imgsz = int(imgsz)
+        self._conf_threshold = float(conf_threshold)
+        self._iou_threshold = float(iou_threshold)
+
+        resolved_path = path
+        resolved_runtime = runtime
+
+        if resolved_runtime is None:
+            if path.suffix == ".engine":
+                resolved_runtime = "tensorrt"
+            elif path.suffix == ".rknn":
+                resolved_runtime = "rknn"
+            elif path.suffix == ".hef":
+                resolved_runtime = "hailo"
+            elif path.suffix == ".param":
+                resolved_runtime = "ncnn"
+            elif path.suffix == ".onnx":
+                # If an engine artifact was built next to the ONNX model, prefer TensorRT
+                engine_sibling = path.with_name("best.engine")
+                if not engine_sibling.exists() and path.parent.name == "exports":
+                    engine_sibling = path.parent / "best.engine"
+                if engine_sibling.exists():
+                    try:
+                        from server.hive_models import _has_tensorrt
+                        if _has_tensorrt():
+                            resolved_runtime = "tensorrt"
+                            resolved_path = engine_sibling
+                    except Exception:
+                        pass
+
+                if resolved_runtime is None:
+                    if Path("/dev/rknpu").exists() or Path("/sys/kernel/debug/rknpu").exists():
+                        resolved_runtime = "rknn"
+                    else:
+                        resolved_runtime = "onnx"
+            else:
+                resolved_runtime = "onnx"
+
+        self._runtime = resolved_runtime
+        self._model_path = resolved_path
+        self._processor = create_processor(
+            model_path=resolved_path,
+            model_family="yolo",
+            runtime=resolved_runtime,
+            imgsz=self._imgsz,
+            conf_threshold=self._conf_threshold,
+            iou_threshold=self._iou_threshold,
+            rknn_core_mask_name=core_mask_name if resolved_runtime == "rknn" else None,
+        )
+
+    @property
+    def runtime(self) -> str:
+        return self._runtime
+
+    @property
+    def core_mask_name(self) -> str:
+        return self._core_mask_name
+
+    @property
+    def model_path(self):
+        return self._model_path
+
+    @property
+    def imgsz(self) -> int:
+        return self._imgsz
+
+    @property
+    def conf_threshold(self) -> float:
+        return self._conf_threshold
+
+    @property
+    def iou_threshold(self) -> float:
+        return self._iou_threshold
+
+    def infer(
+        self, bgr: np.ndarray, *, conf_threshold: Optional[float] = None
+    ) -> Sequence[Bbox]:
+        if conf_threshold is None:
+            detections = self._processor.infer(bgr)
+        else:
+            detections = self._processor.infer(bgr, conf_threshold=conf_threshold)
+        out: list[Bbox] = []
+        for d in detections:
+            b = d.bbox
+            out.append((int(b[0]), int(b[1]), int(b[2]), int(b[3])))
+        return out
+
+    def inferWithScores(
+        self, bgr: np.ndarray, *, conf_threshold: Optional[float] = None
+    ) -> Sequence[ScoredBbox]:
+        if conf_threshold is None:
+            detections = self._processor.infer(bgr)
+        else:
+            detections = self._processor.infer(bgr, conf_threshold=conf_threshold)
+        out: list[ScoredBbox] = []
+        for d in detections:
+            b = d.bbox
+            out.append(
+                ((int(b[0]), int(b[1]), int(b[2]), int(b[3])), float(d.score))
+            )
+        return out
+
+    def close(self) -> None:
+        release_fn = getattr(self._processor, "close", None) or getattr(self._processor, "release", None)
+        if callable(release_fn):
+            release_fn()
+
+
 class RknnYoloRuntime:
     """Thin adapter over ``vision.ml.rknn.RknnYoloProcessor``.
 
