@@ -30,6 +30,16 @@ log = logging.getLogger(__name__)
 
 # Load CUDA runtime via ctypes once
 _CUDART: Any = None
+_TRT_LOGGER: Any = None
+
+
+def _get_trt_logger() -> Any:
+    global _TRT_LOGGER
+    if _TRT_LOGGER is None:
+        import tensorrt as trt
+
+        _TRT_LOGGER = trt.Logger(trt.Logger.WARNING)
+    return _TRT_LOGGER
 
 
 def _get_cudart() -> Any:
@@ -46,6 +56,20 @@ def _get_cudart() -> Any:
                     pass
         if _CUDART is None:
             raise RuntimeError("libcudart.so not found. Install cuda-cudart or configure LD_LIBRARY_PATH.")
+
+        # Explicit 64-bit argument/return signatures for ctypes on Linux aarch64 / x86_64
+        _CUDART.cudaMalloc.argtypes = [ctypes.POINTER(ctypes.c_void_p), ctypes.c_size_t]
+        _CUDART.cudaMalloc.restype = ctypes.c_int
+        _CUDART.cudaFree.argtypes = [ctypes.c_void_p]
+        _CUDART.cudaFree.restype = ctypes.c_int
+        _CUDART.cudaMemcpyAsync.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_void_p]
+        _CUDART.cudaMemcpyAsync.restype = ctypes.c_int
+        _CUDART.cudaStreamCreate.argtypes = [ctypes.POINTER(ctypes.c_void_p)]
+        _CUDART.cudaStreamCreate.restype = ctypes.c_int
+        _CUDART.cudaStreamDestroy.argtypes = [ctypes.c_void_p]
+        _CUDART.cudaStreamDestroy.restype = ctypes.c_int
+        _CUDART.cudaStreamSynchronize.argtypes = [ctypes.c_void_p]
+        _CUDART.cudaStreamSynchronize.restype = ctypes.c_int
     return _CUDART
 
 
@@ -76,7 +100,7 @@ class _TensorrtEngine:
 
         self.engine_path = Path(engine_path)
         self.cudart = _get_cudart()
-        self.logger = trt.Logger(trt.Logger.WARNING)
+        self.logger = _get_trt_logger()
 
         with open(self.engine_path, "rb") as f:
             self.runtime = trt.Runtime(self.logger)
@@ -138,10 +162,10 @@ class _TensorrtEngine:
             input_blob = input_blob.astype(np.float32)
 
         # cudaMemcpyHostToDevice = 1
-        self.cudart.cudaMemcpyAsync(self.d_input, input_blob.ctypes.data, self.input_bytes, 1, self.stream)
+        self.cudart.cudaMemcpyAsync(self.d_input, ctypes.c_void_p(input_blob.ctypes.data), self.input_bytes, 1, self.stream)
         self.context.execute_async_v3(self.stream.value)
         # cudaMemcpyDeviceToHost = 2
-        self.cudart.cudaMemcpyAsync(self.h_output.ctypes.data, self.d_output, self.output_bytes, 2, self.stream)
+        self.cudart.cudaMemcpyAsync(ctypes.c_void_p(self.h_output.ctypes.data), self.d_output, self.output_bytes, 2, self.stream)
         self.cudart.cudaStreamSynchronize(self.stream)
         return self.h_output
 
@@ -195,19 +219,20 @@ class TensorrtYoloProcessor(_TensorrtMixin, BaseProcessor):
         *,
         conf_threshold: float | None = None,
     ) -> list[Detection]:
-        engine = self._ensure_engine()
-        blob, pre = preprocess_yolo(image_bgr, self.imgsz)
-        output = engine.infer(blob)
-        return decode_yolo(
-            output[0],
-            pre=pre,
-            conf_threshold=(
-                float(conf_threshold)
-                if conf_threshold is not None
-                else self.conf_threshold
-            ),
-            iou_threshold=self.iou_threshold,
-        )
+        with self._lock:
+            engine = self._ensure_engine()
+            blob, pre = preprocess_yolo(image_bgr, self.imgsz)
+            output = engine.infer(blob)
+            return decode_yolo(
+                output[0],
+                pre=pre,
+                conf_threshold=(
+                    float(conf_threshold)
+                    if conf_threshold is not None
+                    else self.conf_threshold
+                ),
+                iou_threshold=self.iou_threshold,
+            )
 
 
 class TensorrtNanodetProcessor(_TensorrtMixin, BaseProcessor):
@@ -239,18 +264,19 @@ class TensorrtNanodetProcessor(_TensorrtMixin, BaseProcessor):
         *,
         conf_threshold: float | None = None,
     ) -> list[Detection]:
-        engine = self._ensure_engine()
-        blob, pre = preprocess_nanodet(image_bgr, self.imgsz)
-        output = engine.infer(blob)
-        return decode_nanodet(
-            output[0],
-            pre=pre,
-            conf_threshold=(
-                float(conf_threshold)
-                if conf_threshold is not None
-                else self.conf_threshold
-            ),
-            iou_threshold=self.iou_threshold,
-            reg_max=self.reg_max,
-            strides=self.strides,
-        )
+        with self._lock:
+            engine = self._ensure_engine()
+            blob, pre = preprocess_nanodet(image_bgr, self.imgsz)
+            output = engine.infer(blob)
+            return decode_nanodet(
+                output[0],
+                pre=pre,
+                conf_threshold=(
+                    float(conf_threshold)
+                    if conf_threshold is not None
+                    else self.conf_threshold
+                ),
+                iou_threshold=self.iou_threshold,
+                reg_max=self.reg_max,
+                strides=self.strides,
+            )
