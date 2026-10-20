@@ -45,7 +45,7 @@ CHUTE_MAX_ANGLE = 350
 HOME_SPEED_MICROSTEPS_PER_SEC = -1000
 # The chute's moves start and end at this speed; they cruise at the operating speed.
 MIN_SPEED_MICROSTEPS_PER_SEC = 16
-HOME_TIMEOUT_MS = 15000
+HOME_TIMEOUT_MS = 45000
 
 
 @dataclass
