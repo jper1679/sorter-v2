@@ -118,7 +118,11 @@ class StepperStallMonitor:
         #    derived "chute lost its home reference" hold. `homed` defaults to
         #    True so a chute without the attribute never raises a spurious hold.
         chute = getattr(irl, "chute", None)
-        chute_unhomed = chute is not None and not bool(getattr(chute, "homed", True))
+        chute_unhomed = (
+            chute is not None
+            and not bool(getattr(chute, "homed", True))
+            and not bool(getattr(self._gc, "disable_chute", False))
+        )
         self._sync_incident(now_stalled, chute_unhomed, self._controller_live())
 
     def _request_pause_if_running(self) -> None:

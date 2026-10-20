@@ -82,6 +82,8 @@ class Chute:
 
     @property
     def homed(self) -> bool:
+        if getattr(self.gc, "disable_chute", False):
+            return True
         return self._homed
 
     def markUnhomed(self, reason: str = "") -> None:
