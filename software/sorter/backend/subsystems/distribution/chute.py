@@ -300,6 +300,10 @@ class Chute:
                     f"(polls={polls}, moved={self.current_angle - pos_before:.2f}°, "
                     f"endstop raw={self.raw_endstop_active} triggered={self.endstop_triggered})"
                 )
+                try:
+                    self.stepper.move_at_speed(0, force=True)
+                except Exception:
+                    pass
                 return False
             time.sleep(0.01)
         elapsed_ms = (time.monotonic() - start) * 1000
