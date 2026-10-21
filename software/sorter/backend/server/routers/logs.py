@@ -3,6 +3,9 @@ from __future__ import annotations
 import glob
 import os
 from pathlib import Path
+import shutil
+import subprocess
+import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
@@ -13,12 +16,15 @@ router = APIRouter()
 
 _MAX_READ_BYTES = 512_000
 
+_LOGS_DIR = str(Path(__file__).resolve().parents[4] / "software" / "logs" / "*.log")
+
 _LOG_SOURCES = [
     {
         "id": "machine-backend",
         "label": "Machine Backend",
         "description": "Current sorter runtime and backend process output.",
         "patterns": [
+            _LOGS_DIR,
             "/tmp/sorter-client-main.log",
             "/tmp/sorter-client.log",
             "/tmp/sorter-client-backend.log",
@@ -90,6 +96,16 @@ def _source_entry(spec: dict[str, Any]) -> dict[str, Any]:
 
     selected_path = _pick_latest_path(paths)
     if selected_path is None:
+        if spec["id"] == "machine-backend" and shutil.which("journalctl") is not None:
+            return {
+                "id": spec["id"],
+                "label": spec["label"],
+                "description": spec["description"],
+                "available": True,
+                "path": "journald:sorter-backend",
+                "size_bytes": 0,
+                "updated_at": time.time(),
+            }
         return {
             "id": spec["id"],
             "label": spec["label"],
@@ -154,6 +170,35 @@ def get_log_contents(
     lines: int = Query(default=400, ge=1, le=5000),
 ) -> dict[str, Any]:
     source = _resolve_source_or_404(source_id)
+    if str(source.get("path", "")).startswith("journald:"):
+        cmd = [
+            "journalctl",
+            "-u",
+            "sorter-backend-dev.service",
+            "-u",
+            "sorter-backend.service",
+            "-n",
+            str(lines),
+            "--no-pager",
+            "-o",
+            "cat",
+        ]
+        try:
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=5.0)
+            content = res.stdout
+        except Exception as exc:
+            content = f"Failed to read journalctl: {exc}"
+        return {
+            "id": source_id,
+            "label": source["label"],
+            "description": source["description"],
+            "name": "systemd-journal",
+            "path": source["path"],
+            "size_bytes": len(content.encode("utf-8")),
+            "updated_at": time.time(),
+            "content": content,
+        }
+
     path = Path(source["path"])
     content = _read_log_tail(path, max_bytes=_MAX_READ_BYTES, line_limit=lines)
     stat = path.stat()
