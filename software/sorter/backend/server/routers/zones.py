@@ -6,11 +6,12 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, HTTPException
 
+import local_state
 from server import shared_state
 from zones import watch
 from zones.finder import defaultZones, findInChild
-from zones.model import CAMERA_ROLE, CHANNELS, fromDict, toDict
-from zones.store import loadZones, revision, saveChannel
+from zones.model import CAMERA_ROLE, CHANNELS, fromDict, fromLegacyBlob, toDict, toLegacyBlob
+from zones.store import loadZones, revision, saveChannel, saveZones
 
 router = APIRouter()
 
@@ -94,3 +95,26 @@ def defaultChannelZones(channel: int) -> Dict[str, Any]:
     live = _cameraFrames(_channel(channel))
     h, w = live[0].shape[:2]
     return {"zones": toDict(defaultZones(channel, (w, h)))}
+
+
+@router.get("/api/polygons")
+def getLegacyPolygons() -> Dict[str, Any]:
+    """Backward compatibility endpoint for older frontends."""
+    blob = local_state.get_channel_zones_blob()
+    if not blob:
+        blob = toLegacyBlob(loadZones())
+    return {"channel": blob}
+
+
+@router.post("/api/polygons")
+def saveLegacyPolygons(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Backward compatibility endpoint for older frontends."""
+    if "channel" in body:
+        channel_data = body["channel"]
+        zones = fromLegacyBlob(channel_data)
+        if zones:
+            saveZones(zones)
+        else:
+            local_state.set_channel_zones_blob(channel_data)
+    return {"channel": local_state.get_channel_zones_blob() or {}}
+
