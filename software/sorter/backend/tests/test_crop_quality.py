@@ -138,3 +138,20 @@ def test_burst_capture_complete_is_fixed_window_only() -> None:
     assert Rev01BaseState.burstCaptureComplete(ctx, 100.01) == (True, "frame_cap")
     ctx.captured_crops = [1]
     assert Rev01BaseState.burstCaptureComplete(ctx, 100.40) == (True, "window")
+
+
+def test_burst_capture_complete_waits_for_motionless_captures() -> None:
+    ctx = SimpleNamespace(
+        config=Rev01Config(max_captures=10, capture_at_rest_ms=350.0),
+        captured_crops=[1, 2, 3],
+        capturing_started_at=100.0,
+    )
+    # Window elapsed but piece was still moving (motionless_captures < 2) -> not done
+    assert Rev01BaseState.burstCaptureComplete(ctx, 100.40, motionless_captures=0) == (False, "")
+    assert Rev01BaseState.burstCaptureComplete(ctx, 100.40, motionless_captures=1) == (False, "")
+    # Once 2 motionless captures are recorded and window elapsed -> settled
+    assert Rev01BaseState.burstCaptureComplete(ctx, 100.40, motionless_captures=2) == (True, "settled")
+    # Before window elapsed even with motionless captures -> not done yet
+    assert Rev01BaseState.burstCaptureComplete(ctx, 100.20, motionless_captures=2) == (False, "")
+    # Hard timeout if piece never settles
+    assert Rev01BaseState.burstCaptureComplete(ctx, 100.85, motionless_captures=0) == (True, "timeout")

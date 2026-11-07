@@ -79,7 +79,7 @@ _NPU_CORE_NAMES: tuple[str, ...] = ("NPU_CORE_0", "NPU_CORE_1", "NPU_CORE_2")
 _DEFAULT_CONF_THRESHOLDS: dict[int, float] = {
     2: 0.25,
     3: 0.25,
-    4: 0.10,
+    4: 0.20,
 }
 
 

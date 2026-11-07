@@ -50,7 +50,7 @@ OTHER_VIEW_REQUESTS = 3
 MAX_HOSTED_COLOR_IMAGES = 8
 
 
-@dataclass
+@dataclass(eq=False)
 class _SendImage:
     # One image eligible to be sent to Brickognize, paired with the
     # RecognitionImage that represents it on the KnownObject so a retry strategy
@@ -115,10 +115,10 @@ def _otherViews(
     while left and len(picked) < count:
         def distance(entry) -> float:
             return min((float(np.abs(entry[1] - t).mean()) for t in seen), default=0.0)
-        best = max(left, key=distance)
-        left.remove(best)
-        picked.append(best[0])
-        seen.append(best[1])
+        best_idx = max(range(len(left)), key=lambda i: distance(left[i]))
+        best_s, best_thumb = left.pop(best_idx)
+        picked.append(best_s)
+        seen.append(best_thumb)
     return picked
 
 
@@ -250,7 +250,9 @@ class Rev01BaseState(BaseState):
         return float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
     @staticmethod
-    def burstCaptureComplete(ctx, now: float) -> tuple[bool, str]:
+    def burstCaptureComplete(
+        ctx, now: float, motionless_captures: Optional[int] = None
+    ) -> tuple[bool, str]:
         # Shared stop condition for the at-rest burst (single-piece CAPTURING and
         # the two-piece incoming worker): a plain fixed window — grab frames
         # until max_captures or capture_at_rest_ms, whichever first. No sharpness
@@ -264,6 +266,13 @@ class Rev01BaseState(BaseState):
         elapsed_ms = (now - ctx.capturing_started_at) * 1000.0
         if n >= cfg.max_captures:
             return True, "frame_cap"
+        if motionless_captures is not None:
+            if motionless_captures >= 2 and elapsed_ms >= cfg.capture_at_rest_ms:
+                return True, "settled"
+            timeout_ms = max(cfg.capture_at_rest_ms * 2.0, 800.0)
+            if elapsed_ms >= timeout_ms:
+                return True, "timeout"
+            return False, ""
         if elapsed_ms >= cfg.capture_at_rest_ms:
             return True, "window"
         return False, ""

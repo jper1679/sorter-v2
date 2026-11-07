@@ -29,7 +29,7 @@ class Rev01Config:
     # (6 frames ≈ 200 ms at 30 fps, inside the capture_at_rest_ms window).
     # Deliberately more than classify_burst_count: the extra frames give the
     # quality selection more to choose from.
-    max_captures: int = 6
+    max_captures: int = 14
     # CEILING on burst frames sent to Brickognize. The within-burst quality
     # selection (crop_quality.selectBurstIndices) picks which — and often sends
     # FEWER, when part of the burst is motion-blurred or the piece isn't fully

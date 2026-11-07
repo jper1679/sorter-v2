@@ -269,6 +269,9 @@ class _TrackedPiece:
         # stall watchdog's "has it moved substantially" reference point).
         self.progress_gap: Optional[float] = None
         self.created_at = now
+        self.motionless_frames: int = 0
+        self.motionless_captures: int = 0
+        self.prev_bbox: Optional[tuple[int, int, int, int]] = None
         self.last_seen = now
         # Burst capture (drop zone only) has finished -> safe to rotate the piece
         # out of the drop zone.
@@ -397,6 +400,10 @@ class TwoPieceClassificationChannel(Rev01BaseState):
         # Multi-feed debounce: consecutive distinct frames showing >1 drop-zone id.
         self._multi_drop_streak = 0
         self._multi_drop_last_ts = -1.0
+        # Drop-zone clear debounce: consecutive frames confirming the drop zone is empty
+        # before opening the C3->C4 admission gate (cfg.idle_clear_confirm_reads).
+        self._drop_clear_streak = 0
+        self._drop_clear_last_ts = -1.0
         # Monotonic counter for multi_drop_group ids; advanced once per new clump.
         self._multi_drop_seq = 0
         # A pair seen landing in the drop zone (see _PAIR_DEG): until when a
@@ -544,6 +551,8 @@ class TwoPieceClassificationChannel(Rev01BaseState):
             self._stage_target = None
             self._multi_drop_streak = 0
             self._multi_drop_last_ts = -1.0
+            self._drop_clear_streak = 0
+            self._drop_clear_last_ts = -1.0
             self._cycles.drop()
             # The sweep ran with every door open and emptied the channel, so no
             # loose piece is left to protect the bins from.
@@ -575,7 +584,24 @@ class TwoPieceClassificationChannel(Rev01BaseState):
         # The classification channel OWNS the feeder admission gate. Ready only
         # when we are idle between cycles (not mid-rotation) AND the drop zone is
         # clear AND the platter has settled — i.e. "rotation complete, drop empty".
-        ready = self._phase == _Phase.WAITING and (not state.in_drop) and stopped
+        drop_occupied = bool(state.in_drop) or any(
+            tp.zone == _ZONE_DROP and not tp.ejected for tp in self._pieces.values()
+        )
+        frame_ts = float(getattr(state, "ts", 0.0))
+        last_ts = getattr(self, "_drop_clear_last_ts", -1.0)
+        streak = getattr(self, "_drop_clear_streak", 0)
+        if frame_ts != last_ts:
+            self._drop_clear_last_ts = frame_ts
+            if drop_occupied:
+                self._drop_clear_streak = 0
+            else:
+                self._drop_clear_streak = streak + 1
+
+        cfg_obj = getattr(self.ctx, "config", None)
+        clear_threshold = max(1, int(getattr(cfg_obj, "idle_clear_confirm_reads", 3)))
+        drop_clear = (not drop_occupied) and (getattr(self, "_drop_clear_streak", 0) >= clear_threshold)
+
+        ready = self._phase == _Phase.WAITING and drop_clear and stopped
         self.setClassificationReady(ready, "waiting + drop clear + stopped")
         if not ready:
             self._ready_since = None
@@ -678,6 +704,21 @@ class TwoPieceClassificationChannel(Rev01BaseState):
                 elif abs(gap - tp.progress_gap) > _PROGRESS_MOVE_DEG:
                     tp.progress_gap = gap
                     self.noteProgress()
+            if tp.zone == _ZONE_DROP:
+                if tp.prev_bbox is not None:
+                    cx = (tp.bbox[0] + tp.bbox[2]) / 2.0
+                    cy = (tp.bbox[1] + tp.bbox[3]) / 2.0
+                    prev_cx = (tp.prev_bbox[0] + tp.prev_bbox[2]) / 2.0
+                    prev_cy = (tp.prev_bbox[1] + tp.prev_bbox[3]) / 2.0
+                    d_px = ((cx - prev_cx) ** 2 + (cy - prev_cy) ** 2) ** 0.5
+                    gap_diff = 0.0
+                    if tp.gap_to_exit is not None and len(tp.history) >= 2:
+                        gap_diff = abs(tp.history[-1][1] - tp.history[-2][1])
+                    if d_px <= 4.0 and gap_diff <= 0.5:
+                        tp.motionless_frames += 1
+                    else:
+                        tp.motionless_frames = 0
+                tp.prev_bbox = tp.bbox
 
         for tp in created:
             self._adoptLost(tp, now)
@@ -1190,7 +1231,11 @@ class TwoPieceClassificationChannel(Rev01BaseState):
                 obj = tp.known_object
                 self._cycles.confirmed(time.time(), tp.track_id, obj.uuid if obj is not None else None)
             self._cropBurstFrame(tp.worker, tp.bbox, perc_frame)
-            done, reason = tp.worker.burstCaptureComplete(ctx, now)
+            if tp.motionless_frames >= 2:
+                tp.motionless_captures += 1
+            done, reason = tp.worker.burstCaptureComplete(
+                ctx, now, motionless_captures=tp.motionless_captures
+            )
             if done and self._landedTouching(tp):
                 self._multi_drop_seq += 1
                 self._markDoubleFeed(
@@ -1743,6 +1788,8 @@ class TwoPieceClassificationChannel(Rev01BaseState):
         self._stage_target = None
         self._multi_drop_streak = 0
         self._multi_drop_last_ts = -1.0
+        self._drop_clear_streak = 0
+        self._drop_clear_last_ts = -1.0
         self._cycles.drop()
         self._was_ready = False
         self._ready_since = None
@@ -1789,6 +1836,8 @@ class TwoPieceClassificationChannel(Rev01BaseState):
         self._stage_target = None
         self._multi_drop_streak = 0
         self._multi_drop_last_ts = -1.0
+        self._drop_clear_streak = 0
+        self._drop_clear_last_ts = -1.0
         self._cycles.drop()
         self._was_ready = False
         # The hold lives in the counter on this object, which a teardown resets;

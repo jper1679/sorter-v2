@@ -14,7 +14,7 @@ LOOP_TICK_MS = 10
 # wedged in e.g. "classified" forever. This is the time-based analogue of the
 # teardown ``aborted`` flag (machine stop / reset mid-capture). A genuinely-slow
 # piece that later progresses re-emits with dead=False and self-recovers.
-STUCK_PIECE_TIMEOUT_S = 30.0
+STUCK_PIECE_TIMEOUT_S = 90.0
 # How often the broadcaster scans the known-object lookup for stuck pieces. A
 # cheap dict walk; 1 Hz is ample against the 30 s threshold.
 STUCK_PIECE_REAP_INTERVAL_S = 1.0
