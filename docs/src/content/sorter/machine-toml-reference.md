@@ -57,6 +57,8 @@ Chute stepper calibration: home pin wiring, aiming geometry and speed. The chute
 | `pillar_width_deg` | float (degrees) | `8.25` | Older form of the section width (section pitch minus this), read when `section_width_deg` is absent. Saves keep it in step. |
 | `endstop_active_high` | bool | the board's | Set to true if the chute endstop input reads high when physically triggered. |
 | `operating_speed_microsteps_per_second` | int | `3000` | Chute stepper top speed. Every chute move sets it, so it holds after jogs and tests. |
+| `position_check` | bool | `false` | Every `position_check_every` pieces, find the home switch the way homing does and see how far the chute drifted: steps it lost that StallGuard can't see. Each check also puts the chute back on its position. Turned on on the chute's StallGuard tab. |
+| `position_check_every` | int | `50` | Pieces between two position checks. A check takes about 2 seconds. |
 
 ## `[carousel]`
 
@@ -125,14 +127,14 @@ Per-stepper TMC driver mode. The control program writes these to each driver at 
 
 Per-stepper stall detection. With no entry, the chute (`sgthrs = 55`) and the carousel (`sgthrs = 148`) have it on with `tcoolthrs = 150`; the other motors have it off.
 
-The chute tunes its own (`auto`). While it moves at its operating speed it reads its driver's load figure, and it keeps the speed floor a quarter above the TSTEP of that speed and the threshold far under what normal running reads and far over a stall. When the speed, the current, the microstepping or the chopper mode changes, it learns again. Its StallGuard tab shows what it learned, and says when the chute works harder than it did. A threshold or speed floor saved by hand turns it off.
+The chute can tune its own (`auto`, off until it's turned on on the chute's StallGuard tab). While it moves at its operating speed it reads its driver's load figure, and it keeps the speed floor a quarter above the TSTEP of that speed and the threshold far under what normal running reads and far over a stall. When the speed, the current, the microstepping or the chopper mode changes, it learns again. Its StallGuard tab shows what it learned, and says when the chute works harder than it did. A threshold or speed floor saved by hand turns it off.
 
 To tune by hand, use the StallGuard tab of the chute's settings page or the classification channel's. The tab takes it in five steps: check the speed (the chute starts at its operating speed), record the motor running freely, record a stall by holding it back by hand, review and save the threshold and speed floor, and optionally check them.
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `enabled` | bool | `true` in an entry | Halt the machine when this motor stalls. |
-| `auto` | bool | `false` in an entry; `true` for the chute with no entry | Keep `sgthrs` and `tcoolthrs` set from the operating speed and normal running. Only the chute has it. |
+| `auto` | bool | `false` | Keep `sgthrs` and `tcoolthrs` set from the operating speed and normal running. Only the chute has it. |
 | `sgthrs` | int (0–255) | the motor's, else `50` | Stall threshold: a stall is SG_RESULT at or below twice this. |
 | `tcoolthrs` | int (0–1048575) | `1048575` in an entry | Speed floor, as TSTEP: stall detection acts only above this speed. |
 
