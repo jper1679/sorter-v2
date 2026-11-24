@@ -125,6 +125,9 @@ html_content = f"""<!DOCTYPE html>
         <button onclick="setFilter('verified')" id="btn-filter-verified" class="filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 transition">
           ✓ Déjà validées (<span id="btn-count-verified">0</span>)
         </button>
+        <button onclick="setFilter('ignored')" id="btn-filter-ignored" class="filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-rose-300 hover:bg-slate-700 transition">
+          🚫 Ignorées (<span id="btn-count-ignored">0</span>)
+        </button>
         <button onclick="setFilter('all')" id="btn-filter-all" class="filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 transition">
           Toutes ({total_evaluated})
         </button>
@@ -171,25 +174,47 @@ html_content = f"""<!DOCTYPE html>
 
     // Chargement des vérifications existantes depuis le localStorage
     const STORAGE_KEY = 'sorter_color_labels_v1';
+    const IGNORED_KEY = 'sorter_color_ignored_v1';
     let verifiedLabels = {{}};
+    let ignoredPieces = {{}};
     try {{
       const saved = localStorage.getItem(STORAGE_KEY);
       if (saved) verifiedLabels = JSON.parse(saved);
+      const savedIgnored = localStorage.getItem(IGNORED_KEY);
+      if (savedIgnored) ignoredPieces = JSON.parse(savedIgnored);
     }} catch (e) {{
       console.warn('LocalStorage error:', e);
     }}
 
-    // Par défaut : afficher les pièces à étiqueter (les validées sont cachées de la file)
+    // Par défaut : afficher les pièces à étiqueter (les validées et ignorées sont cachées de la file)
     let currentFilter = 'unverified';
 
     function saveLabels() {{
       try {{
         localStorage.setItem(STORAGE_KEY, JSON.stringify(verifiedLabels));
+        localStorage.setItem(IGNORED_KEY, JSON.stringify(ignoredPieces));
       }} catch (e) {{}}
       updateKPIs();
     }}
 
+    function ignorePiece(uuid, reason = 'artefact_doigt') {{
+      ignoredPieces[uuid] = {{
+        reason: reason,
+        ignored_at: new Date().toISOString()
+      }};
+      delete verifiedLabels[uuid];
+      saveLabels();
+      render();
+    }}
+
+    function unignorePiece(uuid) {{
+      delete ignoredPieces[uuid];
+      saveLabels();
+      render();
+    }}
+
     function setTrueColor(uuid, colorId, colorName, colorHex) {{
+      delete ignoredPieces[uuid];
       verifiedLabels[uuid] = {{
         color_id: parseInt(colorId),
         color_name: colorName,
@@ -217,8 +242,9 @@ html_content = f"""<!DOCTYPE html>
     }}
 
     function resetAllLabels() {{
-      if (confirm('Voulez-vous effacer toutes vos étiquettes personnalisées enregistrées dans le navigateur ?')) {{
+      if (confirm('Voulez-vous effacer toutes vos étiquettes personnalisées et pièces ignorées enregistrées dans le navigateur ?')) {{
         verifiedLabels = {{}};
+        ignoredPieces = {{}};
         saveLabels();
         render();
       }}
@@ -226,14 +252,16 @@ html_content = f"""<!DOCTYPE html>
 
     function updateKPIs() {{
       const count = Object.keys(verifiedLabels).length;
-      const remaining = rawPieces.length - count;
-      const pct = Math.round((count / rawPieces.length) * 100);
+      const ignoredCount = Object.keys(ignoredPieces).length;
+      const remaining = rawPieces.length - count - ignoredCount;
+      const pct = Math.round((count / Math.max(1, rawPieces.length - ignoredCount)) * 100);
 
       document.getElementById('kpi-verified-count').textContent = count;
       document.getElementById('kpi-remaining-count').textContent = remaining;
-      document.getElementById('kpi-verified-pct').textContent = `${{pct}}% complété`;
+      document.getElementById('kpi-verified-pct').textContent = `${{pct}}% complété (${{ignoredCount}} ignorées)`;
       
       document.getElementById('btn-count-verified').textContent = count;
+      document.getElementById('btn-count-ignored').textContent = ignoredCount;
       document.getElementById('btn-count-unverified').textContent = remaining;
     }}
 
@@ -269,17 +297,24 @@ html_content = f"""<!DOCTYPE html>
 
       let filtered = rawPieces.filter(p => {{
         const isVerified = Boolean(verifiedLabels[p.uuid]);
+        const isIgnored = Boolean(ignoredPieces[p.uuid]);
         const trueColorId = isVerified ? verifiedLabels[p.uuid].color_id : p.initial_model_color_id;
         const isYCrCbCorrect = p.ycrcb_pred.id === trueColorId;
         const isRgbCorrect = p.rgb_pred.id === trueColorId;
         const isModelDisagree = p.ycrcb_pred.id !== p.initial_model_color_id;
 
-        // Si l'option "Masquer les validées" est active, masquer sauf si on consulte expressément l'onglet "Déjà validées"
-        if (currentFilter !== 'verified') {{
-          if (currentFilter === 'unverified' && isVerified) return false;
-          if (hideVerifiedCheckbox && isVerified) return false;
+        if (currentFilter === 'ignored') {{
+          if (!isIgnored) return false;
         }} else {{
-          if (!isVerified) return false;
+          if (isIgnored) return false;
+
+          if (currentFilter === 'verified') {{
+            if (!isVerified) return false;
+          }} else if (currentFilter === 'unverified') {{
+            if (isVerified) return false;
+          }} else {{
+            if (hideVerifiedCheckbox && isVerified) return false;
+          }}
         }}
 
         if (currentFilter === 'ycrcb_win' && !(isYCrCbCorrect && !isRgbCorrect)) return false;
@@ -318,6 +353,7 @@ html_content = f"""<!DOCTYPE html>
       filtered.forEach(p => {{
         const userLabel = verifiedLabels[p.uuid];
         const isVerified = Boolean(userLabel);
+        const isIgnored = Boolean(ignoredPieces[p.uuid]);
         const trueColorId = isVerified ? userLabel.color_id : p.initial_model_color_id;
         const trueColorName = isVerified ? userLabel.color_name : p.initial_model_color_name;
         const trueColorHex = isVerified ? userLabel.color_hex : (palette.find(c => c.id === trueColorId)?.hex || '#808080');
@@ -327,7 +363,7 @@ html_content = f"""<!DOCTYPE html>
         const ycrcbWon = ycrcbCorrect && !rgbCorrect;
 
         const card = document.createElement('div');
-        card.className = `bg-slate-900/90 border ${{isVerified ? 'border-emerald-600/90 ring-1 ring-emerald-500/20' : ycrcbWon ? 'border-cyan-600/80 ring-1 ring-cyan-500/20' : 'border-slate-800'}} rounded-2xl p-4 flex flex-col justify-between space-y-3 shadow-md transition hover:border-slate-600`;
+        card.className = `bg-slate-900/90 border ${{isIgnored ? 'border-rose-900/70 bg-rose-950/10' : isVerified ? 'border-emerald-600/90 ring-1 ring-emerald-500/20' : ycrcbWon ? 'border-cyan-600/80 ring-1 ring-cyan-500/20' : 'border-slate-800'}} rounded-2xl p-4 flex flex-col justify-between space-y-3 shadow-md transition hover:border-slate-600`;
 
         // Génération des options du dropdown couleur (triées par ordre alphabétique)
         let optionsHtml = '<option value="">-- Choisir une autre couleur --</option>';
@@ -348,7 +384,7 @@ html_content = f"""<!DOCTYPE html>
                   <span class="bg-slate-800 px-1.5 py-0.5 rounded text-slate-300 font-semibold">${{p.part_id || 'Piece'}}</span>
                   <span>${{p.uuid.slice(0, 8)}}</span>
                 </div>
-                <div class="text-xs font-semibold text-slate-200 truncate max-w-[180px] mt-0.5" title="${{p.part_name || ''}}">
+                <div class="text-xs font-semibold text-slate-200 truncate max-w-[170px] mt-0.5" title="${{p.part_name || ''}}">
                   ${{p.part_name || 'Part'}}
                 </div>
                 <div class="text-[10px] text-slate-500 mt-0.5">
@@ -357,12 +393,41 @@ html_content = f"""<!DOCTYPE html>
               </div>
             </div>
 
-            <div class="flex flex-col items-end gap-1">
-              ${{isVerified ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700">✓ Validé</span>' : '<span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-800 text-slate-400">À étiqueter</span>'}}
-              ${{ycrcbWon ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800">YCrCb Gagnant</span>' : ''}}
+            <div class="flex flex-col items-end gap-1.5">
+              <div class="flex items-center gap-1">
+                ${{isIgnored ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-950 text-rose-300 border border-rose-800">🚫 Ignoré</span>' : isVerified ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700">✓ Validé</span>' : '<span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-800 text-slate-400">À étiqueter</span>'}}
+                ${{ycrcbWon && !isIgnored ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800">YCrCb Gagnant</span>' : ''}}
+              </div>
+              
+              <div>
+                ${{isIgnored ? `
+                  <button onclick="unignorePiece('${{p.uuid}}')" class="px-2.5 py-1 rounded-lg bg-rose-950/90 hover:bg-rose-900 border border-rose-700 text-rose-200 text-[11px] font-bold flex items-center gap-1 transition active:scale-95 shadow-sm" title="Réintégrer cette pièce dans l'étiquetage">
+                    <span>↺ Réintégrer</span>
+                  </button>
+                ` : `
+                  <button onclick="ignorePiece('${{p.uuid}}')" class="px-2.5 py-1 rounded-lg bg-slate-950 hover:bg-rose-950/80 border border-slate-700/80 hover:border-rose-700 text-slate-400 hover:text-rose-300 text-[11px] font-medium flex items-center gap-1 transition active:scale-95" title="Ignorer cette pièce (doigt visible, mauvaise découpe, image floue)">
+                    <span>🚫 Ignorer</span>
+                  </button>
+                `}}
+              </div>
             </div>
           </div>
 
+          ${{isIgnored ? `
+          <!-- Bannière Ignorée -->
+          <div class="bg-rose-950/30 border border-rose-900/60 rounded-xl p-3 flex items-center justify-between text-xs text-rose-300">
+            <div class="flex items-center gap-2">
+              <span class="text-base">🚫</span>
+              <div>
+                <div class="font-bold">Image exclue de l'apprentissage</div>
+                <div class="text-[10px] text-rose-400/90">Doigt, artefact ou mauvaise découpe — non exportée dans le dataset.</div>
+              </div>
+            </div>
+            <button onclick="unignorePiece('${{p.uuid}}')" class="text-xs text-rose-300 hover:text-white underline font-semibold flex-shrink-0">
+              Annuler
+            </button>
+          </div>
+          ` : `
           <!-- Section VRAIE COULEUR (Cœur de l'étiquetage pour l'apprentissage) -->
           <div class="bg-slate-950/80 border ${{isVerified ? 'border-emerald-800/80' : 'border-slate-800'}} rounded-xl p-3 space-y-2">
             <div class="flex items-center justify-between text-xs">
@@ -402,6 +467,7 @@ html_content = f"""<!DOCTYPE html>
               </button>
             </div>
           </div>
+          `}}
 
           <!-- Comparaison Prédictions YCrCb vs RGB -->
           <div class="grid grid-cols-2 gap-2 text-xs pt-1">
@@ -441,7 +507,8 @@ html_content = f"""<!DOCTYPE html>
       const exportList = [];
       rawPieces.forEach(p => {{
         const userLabel = verifiedLabels[p.uuid];
-        if (userLabel) {{
+        const isIgnored = Boolean(ignoredPieces[p.uuid]);
+        if (userLabel && !isIgnored) {{
           exportList.push({{
             piece_uuid: p.uuid,
             part_id: p.part_id,
@@ -458,7 +525,7 @@ html_content = f"""<!DOCTYPE html>
       }});
 
       if (exportList.length === 0) {{
-        alert("Vous n'avez pas encore étiqueté de pièces manuellement ! Cliquez sur les boutons de validation ou sélectionnez des couleurs pour étiqueter vos pièces avant d'exporter.");
+        alert("Vous n'avez pas encore validé de pièces exploitables. Étiquetez vos pièces avant d'exporter.");
         return;
       }}
 
@@ -473,22 +540,33 @@ html_content = f"""<!DOCTYPE html>
 
     // Exportation du script SQL pour injecter dans local_state.sqlite
     function exportSQLUpdates() {{
-      const keys = Object.keys(verifiedLabels);
-      if (keys.length === 0) {{
-        alert("Aucune pièce étiquetée pour générer le script SQL.");
+      const verifiedKeys = Object.keys(verifiedLabels).filter(id => !ignoredPieces[id]);
+      const ignoredKeys = Object.keys(ignoredPieces);
+      if (verifiedKeys.length === 0 && ignoredKeys.length === 0) {{
+        alert("Aucune pièce étiquetée ou ignorée pour générer le script SQL.");
         return;
       }}
-      let sql = `-- Script d'injection des vraies couleurs dans local_state.sqlite\n-- Généré le ${{new Date().toLocaleString()}}\n\n`;
-      keys.forEach(uuid => {{
-        const l = verifiedLabels[uuid];
-        sql += `UPDATE piece_records SET color_corrected_id = '${{l.color_id}}' WHERE uuid = '${{uuid}}';\n`;
-      }});
+      let sql = `-- Script d'injection des corrections dans local_state.sqlite\n-- Généré le ${{new Date().toLocaleString()}}\n\n`;
+      if (verifiedKeys.length > 0) {{
+        sql += `-- Vraies couleurs validées par l'opérateur (${{verifiedKeys.length}} pièces)\n`;
+        verifiedKeys.forEach(uuid => {{
+          const l = verifiedLabels[uuid];
+          sql += `UPDATE piece_records SET color_corrected_id = '${{l.color_id}}' WHERE uuid = '${{uuid}}';\n`;
+        }});
+        sql += `\n`;
+      }}
+      if (ignoredKeys.length > 0) {{
+        sql += `-- Pièces ignorées (artefacts, doigts, mauvaises découpes) (${{ignoredKeys.length}} pièces)\n`;
+        ignoredKeys.forEach(uuid => {{
+          sql += `UPDATE piece_records SET dead = 1, rejection_reasons = '["bad_crop_or_finger"]' WHERE uuid = '${{uuid}}';\n`;
+        }});
+      }}
 
       const blob = new Blob([sql], {{ type: 'text/sql' }});
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `corrections_couleurs_${{keys.length}}_pieces.sql`;
+      a.download = `corrections_couleurs_${{verifiedKeys.length}}_validees_${{ignoredKeys.length}}_ignorees.sql`;
       a.click();
       URL.revokeObjectURL(url);
     }}
