@@ -15,8 +15,14 @@ from typing import Any, Mapping, Optional, Sequence
 import cv2
 import numpy as np
 
+# Import machine piece mask to cleanly exclude chute background
+try:
+    from subsystems.classification_channel.crop_quality import pieceMask
+except ImportError:
+    pieceMask = None  # fallback if imported standalone
 
-# Default BrickLink palette reference mapping
+
+# Default BrickLink palette reference mapping (Solid colors primary for sorting)
 BRICKLINK_PALETTE_REFERENCE: list[dict[str, Any]] = [
     # Neutrals
     {"id": 1, "name": "White", "hex": "#FFFFFF", "is_trans": False},
@@ -87,7 +93,7 @@ def hex_to_rgb(hex_code: str) -> tuple[int, int, int]:
 
 
 def rgb_to_ycrcb(r: float, g: float, b: float) -> tuple[float, float, float]:
-    """Standard ITU-R BT.601 conversion (same as cv2.COLOR_BGR2YCrCb)."""
+    """Standard ITU-R BT.601 conversion (cv2.COLOR_BGR2YCrCb)."""
     y = 0.299 * r + 0.587 * g + 0.114 * b
     cr = (r - y) * 0.713 + 128.0
     cb = (b - y) * 0.564 + 128.0
@@ -114,10 +120,11 @@ class PaletteEntry:
     rgb: tuple[float, float, float]
     ycrcb: tuple[float, float, float]
     lab: tuple[float, float, float]
+    is_trans: bool = False
 
 
 class ColorPalette:
-    def __init__(self, entries: Sequence[dict[str, Any]] | None = None) -> None:
+    def __init__(self, entries: Sequence[dict[str, Any]] | None = None, include_trans: bool = False) -> None:
         source = entries if entries is not None else BRICKLINK_PALETTE_REFERENCE
         self.entries: list[PaletteEntry] = []
         self._by_id: dict[int, PaletteEntry] = {}
@@ -126,6 +133,10 @@ class ColorPalette:
         for row in source:
             cid = int(row.get("id") or 0)
             name = str(row.get("name") or "")
+            is_trans = bool(row.get("is_trans") or name.lower().startswith("trans-"))
+            if not include_trans and is_trans:
+                continue
+
             hex_val = str(row.get("hex") or row.get("rgb") or "#808080")
             if not hex_val.startswith("#"):
                 hex_val = f"#{hex_val}"
@@ -138,6 +149,7 @@ class ColorPalette:
                 rgb=(r, g, b),
                 ycrcb=rgb_to_ycrcb(r, g, b),
                 lab=rgb_to_lab(r, g, b),
+                is_trans=is_trans,
             )
             self.entries.append(entry)
             self._by_id[cid] = entry
@@ -170,30 +182,38 @@ class CropFeatures:
     pixel_count: int
 
 
-def extract_crop_features(bgr: np.ndarray, center_fraction: float = 0.6) -> CropFeatures | None:
-    """Extract representative color in RGB, YCrCb, and CIELAB from a crop."""
+def extract_crop_features(bgr: np.ndarray, use_mask: bool = True) -> CropFeatures | None:
+    """Extract representative color in RGB, YCrCb, and CIELAB from a crop.
+
+    Uses pieceMask to cleanly segment the piece from the background chute.
+    """
     if bgr is None or bgr.size == 0:
         return None
 
-    h, w = bgr.shape[:2]
-    bx = int(w * (1.0 - center_fraction) / 2.0)
-    by = int(h * (1.0 - center_fraction) / 2.0)
-    cropped = bgr[by : h - by, bx : w - bx] if (h - 2 * by >= 2 and w - 2 * bx >= 2) else bgr
+    pixels_bgr = None
+    if use_mask and pieceMask is not None:
+        try:
+            mask = pieceMask(bgr)
+            if mask is not None and mask.sum() > 30:
+                pixels_bgr = bgr[mask > 0]
+        except Exception:
+            pixels_bgr = None
 
-    # Downsample for fast robust averaging
-    small = cv2.resize(cropped, (48, 48), interpolation=cv2.INTER_AREA)
+    if pixels_bgr is None or len(pixels_bgr) < 20:
+        # Fallback: central region (middle 60%)
+        h, w = bgr.shape[:2]
+        bx = int(w * 0.2)
+        by = int(h * 0.2)
+        cropped = bgr[by : h - by, bx : w - bx] if (h - 2 * by >= 2 and w - 2 * bx >= 2) else bgr
+        small = cv2.resize(cropped, (48, 48), interpolation=cv2.INTER_AREA)
+        pixels_bgr = small.reshape(-1, 3)
 
-    # Average in BGR, then convert to RGB
-    b, g, r = small.reshape(-1, 3).mean(axis=0)
+    b, g, r = pixels_bgr.mean(axis=0)
     rgb = (float(r), float(g), float(b))
-
-    # YCrCb directly from RGB
     ycrcb = rgb_to_ycrcb(rgb[0], rgb[1], rgb[2])
-
-    # CIELAB directly from RGB
     lab = rgb_to_lab(rgb[0], rgb[1], rgb[2])
 
-    return CropFeatures(rgb=rgb, ycrcb=ycrcb, lab=lab, pixel_count=small.shape[0] * small.shape[1])
+    return CropFeatures(rgb=rgb, ycrcb=ycrcb, lab=lab, pixel_count=len(pixels_bgr))
 
 
 def match_color_rgb(rgb: tuple[float, float, float], palette: ColorPalette, top_k: int = 3) -> list[ColorMatch]:
@@ -207,7 +227,6 @@ def match_color_rgb(rgb: tuple[float, float, float], palette: ColorPalette, top_
     scores.sort(key=lambda s: s[0])
 
     matches = []
-    best_dist = scores[0][0] if scores else 0.0
     for dist, entry in scores[:top_k]:
         conf = math.exp(-dist / 35.0)
         matches.append(
@@ -230,19 +249,12 @@ def match_color_ycrcb(
     w_chroma: float = 1.0,
     top_k: int = 3,
 ) -> list[ColorMatch]:
-    """Nearest neighbor search in YCrCb with decoupled Luma and Chroma.
-
-    Chrominance (Cr, Cb) represents pigment tone invariant to illumination.
-    Luminance (Y) is down-weighted to tolerate shadows, reflections, and
-    illumination variations across the channel chute. For neutral colors
-    (where chroma is low), luma weight is adaptively restored.
-    """
+    """Nearest neighbor search in YCrCb with decoupled Luma and Chroma."""
     scores: list[tuple[float, PaletteEntry]] = []
     y1, cr1, cb1 = ycrcb
 
-    # Chroma magnitude relative to neutral gray (128, 128)
     chroma_mag = math.hypot(cr1 - 128.0, cb1 - 128.0)
-    # If the piece is near neutral (white, gray, black), increase Y sensitivity
+    # Adaptive luma weight for achromatic / neutral parts (white/gray/black)
     adaptive_w_y = w_y if chroma_mag > 15.0 else max(w_y, 0.75 - chroma_mag * 0.03)
 
     for p in palette.entries:
@@ -294,22 +306,3 @@ def match_color_lab(lab: tuple[float, float, float], palette: ColorPalette, top_
             )
         )
     return matches
-
-
-@dataclass
-class PieceEvaluation:
-    uuid: str
-    part_id: str | None
-    recorded_color_id: str | None
-    recorded_color_name: str | None
-    crop_count: int
-    mean_rgb: tuple[float, float, float]
-    mean_ycrcb: tuple[float, float, float]
-    mean_lab: tuple[float, float, float]
-    rgb_matches: list[ColorMatch]
-    ycrcb_matches: list[ColorMatch]
-    lab_matches: list[ColorMatch]
-    rgb_agrees: bool
-    ycrcb_agrees: bool
-    lab_agrees: bool
-    sample_crop_relpath: str | None = None

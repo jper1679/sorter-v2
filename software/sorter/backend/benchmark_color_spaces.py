@@ -12,6 +12,7 @@ import cv2
 import numpy as np
 
 from color_space_analyzer import (
+    BRICKLINK_PALETTE_REFERENCE,
     ColorPalette,
     extract_crop_features,
     match_color_lab,
@@ -26,7 +27,7 @@ def run_benchmark(
     max_pieces: int = 150,
     export_json_path: str | None = None,
 ) -> dict[str, Any]:
-    palette = ColorPalette()
+    palette = ColorPalette(include_trans=False)
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
 
@@ -44,8 +45,6 @@ def run_benchmark(
     ycrcb_correct = 0
     lab_correct = 0
     total = 0
-
-    confusion_rgb_to_ycrcb: list[dict[str, Any]] = []
 
     for uuid, part_id, part_name, color_id, color_name, color_corrected_id in rows:
         target_color_id = int(color_corrected_id) if color_corrected_id and str(color_corrected_id).isdigit() else int(color_id) if str(color_id).isdigit() else None
@@ -68,12 +67,11 @@ def run_benchmark(
             if bgr is None:
                 continue
 
-            feat = extract_crop_features(bgr)
+            feat = extract_crop_features(bgr, use_mask=True)
             if feat is not None:
                 features_list.append(feat)
 
             if sample_b64 is None:
-                # Thumbnail for the validation UI
                 h, w = bgr.shape[:2]
                 scale = min(120.0 / max(w, 1), 120.0 / max(h, 1))
                 thumb = cv2.resize(bgr, (max(1, int(w * scale)), max(1, int(h * scale))))
@@ -112,8 +110,11 @@ def run_benchmark(
             "uuid": uuid,
             "part_id": part_id,
             "part_name": part_name,
+            "initial_model_color_id": target_color_id,
+            "initial_model_color_name": color_name,
             "ground_truth_id": target_color_id,
             "ground_truth_name": color_name,
+            "user_verified": bool(color_corrected_id),
             "crop_count": len(crop_files),
             "mean_rgb": [round(float(c), 1) for c in mean_rgb],
             "mean_ycrcb": [round(float(c), 1) for c in mean_ycrcb],
@@ -145,6 +146,11 @@ def run_benchmark(
         if total >= max_pieces:
             break
 
+    palette_options = [
+        {"id": p.id, "name": p.name, "hex": p.hex}
+        for p in palette.entries
+    ]
+
     summary = {
         "total_evaluated": total,
         "rgb_accuracy": round(rgb_correct / max(1, total) * 100.0, 1),
@@ -153,6 +159,7 @@ def run_benchmark(
         "rgb_correct": rgb_correct,
         "ycrcb_correct": ycrcb_correct,
         "lab_correct": lab_correct,
+        "palette": palette_options,
         "pieces": evaluated_pieces,
     }
 
