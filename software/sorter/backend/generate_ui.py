@@ -8,8 +8,11 @@ artifact_dir = Path(r"C:\Users\Jean-Philippe\.gemini\antigravity\brain\b43ddede-
 artifact_dir.mkdir(parents=True, exist_ok=True)
 output_html = artifact_dir / "color_validation_ui.html"
 
+# Sort palette alphabetically by name
+sorted_palette = sorted(bench_data["palette"], key=lambda c: c["name"].lower())
+
 pieces_json = json.dumps(bench_data["pieces"])
-palette_json = json.dumps(bench_data["palette"])
+palette_json = json.dumps(sorted_palette)
 total_evaluated = bench_data["total_evaluated"]
 rgb_acc = bench_data["rgb_accuracy"]
 ycrcb_acc = bench_data["ycrcb_accuracy"]
@@ -68,7 +71,7 @@ html_content = f"""<!DOCTYPE html>
           </span>
         </div>
         <p class="text-xs md:text-sm text-slate-400 mt-1">
-          Attribuez la <strong>vraie couleur (ground truth)</strong> aux pièces capturées pour alimenter l'apprentissage de la machine et comparer les espaces de couleur.
+          Validez la <strong>vraie couleur</strong> des pièces pour alimenter le dataset d'apprentissage. Les tuiles validées sont automatiquement masquées de la file de travail.
         </p>
       </div>
 
@@ -89,17 +92,17 @@ html_content = f"""<!DOCTYPE html>
     <!-- KPIs & Synthèse -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3.5">
       <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5">
-        <div class="text-[11px] font-medium text-slate-400 uppercase tracking-wider">Pièces au total</div>
-        <div class="text-xl md:text-2xl font-black text-white mt-1">{total_evaluated}</div>
-        <div class="text-[11px] text-slate-500 mt-0.5">Captures C4 en production</div>
+        <div class="text-[11px] font-medium text-slate-400 uppercase tracking-wider">File de travail</div>
+        <div class="text-xl md:text-2xl font-black text-white mt-1" id="kpi-remaining-count">{total_evaluated}</div>
+        <div class="text-[11px] text-slate-500 mt-0.5">Pièces restantes à étiqueter</div>
       </div>
       <div class="bg-slate-900/80 border border-emerald-900/60 rounded-xl p-3.5 bg-gradient-to-br from-slate-900 to-emerald-950/30">
         <div class="text-[11px] font-medium text-emerald-400 uppercase tracking-wider flex items-center justify-between">
-          <span>Étiquetées par vous</span>
+          <span>Étiquetées & Prêtes</span>
           <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
         </div>
         <div class="text-xl md:text-2xl font-black text-emerald-300 mt-1" id="kpi-verified-count">0</div>
-        <div class="text-[11px] text-emerald-400/80 mt-0.5 font-medium" id="kpi-verified-pct">0% du dataset prêt pour l'apprentissage</div>
+        <div class="text-[11px] text-emerald-400/80 mt-0.5 font-medium" id="kpi-verified-pct">0% complété</div>
       </div>
       <div class="bg-slate-900/80 border border-cyan-900/60 rounded-xl p-3.5 bg-gradient-to-br from-slate-900 to-cyan-950/30">
         <div class="text-[11px] font-medium text-cyan-400 uppercase tracking-wider">Succès YCrCb</div>
@@ -116,16 +119,30 @@ html_content = f"""<!DOCTYPE html>
     <!-- Barre d'outils et Filtres -->
     <div class="bg-slate-900/80 border border-slate-800 rounded-xl p-3.5 flex flex-wrap items-center justify-between gap-3">
       <div class="flex flex-wrap items-center gap-1.5">
-        <button onclick="setFilter('all')" id="btn-filter-all" class="filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-600 text-white transition">Toutes ({total_evaluated})</button>
-        <button onclick="setFilter('unverified')" id="btn-filter-unverified" class="filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 transition">À vérifier</button>
-        <button onclick="setFilter('verified')" id="btn-filter-verified" class="filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 transition">Vérifiées par vous (<span id="btn-count-verified">0</span>)</button>
-        <button onclick="setFilter('ycrcb_win')" id="btn-filter-ycrcb_win" class="filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 transition">YCrCb bat RGB</button>
-        <button onclick="setFilter('disagree')" id="btn-filter-disagree" class="filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 transition">Désaccord YCrCb / Modèle</button>
+        <button onclick="setFilter('unverified')" id="btn-filter-unverified" class="filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-cyan-600 text-white transition">
+          ⚡ À étiqueter (<span id="btn-count-unverified">{total_evaluated}</span>)
+        </button>
+        <button onclick="setFilter('verified')" id="btn-filter-verified" class="filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 transition">
+          ✓ Déjà validées (<span id="btn-count-verified">0</span>)
+        </button>
+        <button onclick="setFilter('all')" id="btn-filter-all" class="filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 transition">
+          Toutes ({total_evaluated})
+        </button>
+        <button onclick="setFilter('ycrcb_win')" id="btn-filter-ycrcb_win" class="filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 transition">
+          YCrCb bat RGB
+        </button>
+        <button onclick="setFilter('disagree')" id="btn-filter-disagree" class="filter-btn px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 transition">
+          Désaccord YCrCb / Modèle
+        </button>
       </div>
 
-      <div class="flex items-center gap-2.5">
-        <input type="text" id="search-input" oninput="render()" placeholder="Rechercher couleur, ID pièce ou UUID..." class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 w-64">
-        <span class="text-xs text-slate-400 font-mono" id="showing-count">150 pièces</span>
+      <div class="flex items-center gap-3">
+        <label class="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
+          <input type="checkbox" id="toggle-hide-verified" checked onchange="render()" class="rounded bg-slate-950 border-slate-700 text-cyan-500 focus:ring-0">
+          <span>Masquer les validées</span>
+        </label>
+        <input type="text" id="search-input" oninput="render()" placeholder="Filtrer couleur, part ID ou UUID..." class="bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500 w-56">
+        <span class="text-xs text-slate-400 font-mono" id="showing-count">{total_evaluated} pièces</span>
       </div>
     </div>
 
@@ -148,7 +165,9 @@ html_content = f"""<!DOCTYPE html>
 
   <script>
     const rawPieces = {pieces_json};
+    // Palette triée rigoureusement par ordre alphabétique
     const palette = {palette_json};
+    palette.sort((a, b) => a.name.localeCompare(b.name, 'fr', {{ sensitivity: 'base' }}));
 
     // Chargement des vérifications existantes depuis le localStorage
     const STORAGE_KEY = 'sorter_color_labels_v1';
@@ -160,7 +179,8 @@ html_content = f"""<!DOCTYPE html>
       console.warn('LocalStorage error:', e);
     }}
 
-    let currentFilter = 'all';
+    // Par défaut : afficher les pièces à étiqueter (les validées sont cachées de la file)
+    let currentFilter = 'unverified';
 
     function saveLabels() {{
       try {{
@@ -196,10 +216,15 @@ html_content = f"""<!DOCTYPE html>
 
     function updateKPIs() {{
       const count = Object.keys(verifiedLabels).length;
+      const remaining = rawPieces.length - count;
       const pct = Math.round((count / rawPieces.length) * 100);
+
       document.getElementById('kpi-verified-count').textContent = count;
-      document.getElementById('kpi-verified-pct').textContent = `${{pct}}% du dataset prêt pour l'apprentissage`;
+      document.getElementById('kpi-remaining-count').textContent = remaining;
+      document.getElementById('kpi-verified-pct').textContent = `${{pct}}% complété`;
+      
       document.getElementById('btn-count-verified').textContent = count;
+      document.getElementById('btn-count-unverified').textContent = remaining;
     }}
 
     function setFilter(f) {{
@@ -228,6 +253,7 @@ html_content = f"""<!DOCTYPE html>
 
     function render() {{
       const q = document.getElementById('search-input').value.toLowerCase().trim();
+      const hideVerifiedCheckbox = document.getElementById('toggle-hide-verified').checked;
       const grid = document.getElementById('pieces-grid');
       grid.innerHTML = '';
 
@@ -238,8 +264,14 @@ html_content = f"""<!DOCTYPE html>
         const isRgbCorrect = p.rgb_pred.id === trueColorId;
         const isModelDisagree = p.ycrcb_pred.id !== p.initial_model_color_id;
 
-        if (currentFilter === 'unverified' && isVerified) return false;
-        if (currentFilter === 'verified' && !isVerified) return false;
+        // Si l'option "Masquer les validées" est active, masquer sauf si on consulte expressément l'onglet "Déjà validées"
+        if (currentFilter !== 'verified') {{
+          if (currentFilter === 'unverified' && isVerified) return false;
+          if (hideVerifiedCheckbox && isVerified) return false;
+        }} else {{
+          if (!isVerified) return false;
+        }}
+
         if (currentFilter === 'ycrcb_win' && !(isYCrCbCorrect && !isRgbCorrect)) return false;
         if (currentFilter === 'disagree' && !isModelDisagree) return false;
 
@@ -255,7 +287,23 @@ html_content = f"""<!DOCTYPE html>
         return true;
       }});
 
-      document.getElementById('showing-count').textContent = `${{filtered.length}} / ${{rawPieces.length}} pièces`;
+      document.getElementById('showing-count').textContent = `${{filtered.length}} pièces affichées`;
+
+      if (filtered.length === 0) {{
+        grid.innerHTML = `
+          <div class="col-span-full py-16 text-center space-y-3 bg-slate-900/40 border border-slate-800/80 rounded-2xl">
+            <div class="text-3xl">🎉</div>
+            <div class="text-base font-bold text-slate-200">Aucune pièce à afficher dans cette vue !</div>
+            <div class="text-xs text-slate-400 max-w-md mx-auto">
+              ${{currentFilter === 'unverified' || hideVerifiedCheckbox 
+                ? 'Toutes les pièces visibles ont été validées ou filtrées. Vous pouvez revoir vos choix dans l\\'onglet "✓ Déjà validées".' 
+                : 'Aucune pièce ne correspond à vos critères de recherche.'}}
+            </div>
+            ${{currentFilter === 'unverified' ? `<button onclick="setFilter('verified')" class="px-4 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold shadow-md transition">Voir les pièces validées</button>` : ''}}
+          </div>
+        `;
+        return;
+      }}
 
       filtered.forEach(p => {{
         const userLabel = verifiedLabels[p.uuid];
@@ -271,7 +319,7 @@ html_content = f"""<!DOCTYPE html>
         const card = document.createElement('div');
         card.className = `bg-slate-900/90 border ${{isVerified ? 'border-emerald-600/90 ring-1 ring-emerald-500/20' : ycrcbWon ? 'border-cyan-600/80 ring-1 ring-cyan-500/20' : 'border-slate-800'}} rounded-2xl p-4 flex flex-col justify-between space-y-3 shadow-md transition hover:border-slate-600`;
 
-        // Génération des options du dropdown couleur
+        // Génération des options du dropdown couleur (triées par ordre alphabétique)
         let optionsHtml = '<option value="">-- Choisir une autre couleur --</option>';
         palette.forEach(c => {{
           const sel = c.id === trueColorId ? 'selected' : '';
@@ -300,7 +348,7 @@ html_content = f"""<!DOCTYPE html>
             </div>
 
             <div class="flex flex-col items-end gap-1">
-              ${{isVerified ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700">✓ Vrai Label Validé</span>' : '<span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-800 text-slate-400">Non étiqueté</span>'}}
+              ${{isVerified ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-700">✓ Validé</span>' : '<span class="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-800 text-slate-400">À étiqueter</span>'}}
               ${{ycrcbWon ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800">YCrCb Gagnant</span>' : ''}}
             </div>
           </div>
@@ -309,7 +357,7 @@ html_content = f"""<!DOCTYPE html>
           <div class="bg-slate-950/80 border ${{isVerified ? 'border-emerald-800/80' : 'border-slate-800'}} rounded-xl p-3 space-y-2">
             <div class="flex items-center justify-between text-xs">
               <span class="text-slate-400 font-medium">Vraie Couleur (Ground Truth) :</span>
-              ${{isVerified ? `<button onclick="clearLabel('${{p.uuid}}')" class="text-[10px] text-slate-500 hover:text-rose-400 underline">Annuler</button>` : ''}}
+              ${{isVerified ? `<button onclick="clearLabel('${{p.uuid}}')" class="text-[10px] text-slate-500 hover:text-rose-400 underline">Dé-valider</button>` : ''}}
             </div>
             
             <div class="flex items-center gap-2">
@@ -329,7 +377,7 @@ html_content = f"""<!DOCTYPE html>
               </button>
             </div>
 
-            <!-- Sélecteur complet de catalogue -->
+            <!-- Sélecteur complet de catalogue (Alphabétique) -->
             <div class="pt-1">
               <select onchange="if(this.value){{ const opt=this.options[this.selectedIndex]; setTrueColor('${{p.uuid}}', this.value, opt.dataset.name, opt.dataset.hex); }}" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 cursor-pointer">
                 ${{optionsHtml}}
@@ -435,4 +483,4 @@ html_content = f"""<!DOCTYPE html>
 """
 
 output_html.write_text(html_content, encoding="utf-8")
-print("New interactive training studio written to:", output_html)
+print("Updated UI generated at:", output_html)
