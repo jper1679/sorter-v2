@@ -200,6 +200,16 @@ html_content = f"""<!DOCTYPE html>
       render();
     }}
 
+    function confirmSelectColor(uuid) {{
+      const sel = document.getElementById('select-color-' + uuid);
+      if (!sel || !sel.value) {{
+        alert("Veuillez sélectionner une couleur dans la liste déroulante.");
+        return;
+      }}
+      const opt = sel.options[sel.selectedIndex];
+      setTrueColor(uuid, sel.value, opt.dataset.name, opt.dataset.hex);
+    }}
+
     function clearLabel(uuid) {{
       delete verifiedLabels[uuid];
       saveLabels();
@@ -375,13 +385,21 @@ html_content = f"""<!DOCTYPE html>
               <button onclick="setTrueColor('${{p.uuid}}', '${{p.rgb_pred.id}}', '${{p.rgb_pred.name}}', '${{p.rgb_pred.hex}}')" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition active:scale-95" title="Définir RGB comme la vraie couleur">
                 RGB (${{p.rgb_pred.name}})
               </button>
+              ${{p.initial_model_color_id && p.initial_model_color_id !== p.ycrcb_pred.id && p.initial_model_color_id !== p.rgb_pred.id ? `
+              <button onclick="setTrueColor('${{p.uuid}}', '${{p.initial_model_color_id}}', '${{p.initial_model_color_name}}', '${{trueColorHex}}')" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 transition active:scale-95" title="Définir la prédiction initiale de la machine comme la vraie couleur">
+                Modèle (${{p.initial_model_color_name}})
+              </button>
+              ` : ''}}
             </div>
 
-            <!-- Sélecteur complet de catalogue (Alphabétique) -->
-            <div class="pt-1">
-              <select onchange="if(this.value){{ const opt=this.options[this.selectedIndex]; setTrueColor('${{p.uuid}}', this.value, opt.dataset.name, opt.dataset.hex); }}" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 cursor-pointer">
+            <!-- Sélecteur complet de catalogue (Alphabétique) avec Bouton Confirmer -->
+            <div class="pt-1 flex items-center gap-1.5">
+              <select id="select-color-${{p.uuid}}" class="flex-1 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 cursor-pointer">
                 ${{optionsHtml}}
               </select>
+              <button onclick="confirmSelectColor('${{p.uuid}}')" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow-sm transition active:scale-95 flex items-center gap-1 flex-shrink-0" title="Confirmer la couleur choisie dans la liste">
+                <span>✓ Confirmer</span>
+              </button>
             </div>
           </div>
 
