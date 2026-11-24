@@ -27,7 +27,7 @@ def run_benchmark(
     max_pieces: int = 150,
     export_json_path: str | None = None,
 ) -> dict[str, Any]:
-    palette = ColorPalette(include_trans=False)
+    palette = ColorPalette(include_trans=True)
     conn = sqlite3.connect(db_path)
     cur = conn.cursor()
 
@@ -147,7 +147,7 @@ def run_benchmark(
             break
 
     palette_options = [
-        {"id": p.id, "name": p.name, "hex": p.hex}
+        {"id": p.id, "name": p.name, "hex": p.hex, "is_trans": p.is_trans, "finish": p.finish}
         for p in palette.entries
     ]
 
